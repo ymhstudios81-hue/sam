@@ -5,8 +5,10 @@ export interface RenderProgressCallback {
 }
 
 /**
- * Client-side video render generator that creates a real downloadable video Blob (MP4/WebM)
- * with framing, captions, speaker cards, and audio waveforms.
+ * Client-side video render engine that takes the user's actual video source (MP4/WebM/MOV),
+ * seeks to the exact clip timestamps (clip.start to clip.end), applies aspect ratio framing
+ * (9:16 vertical, 16:9 landscape, 1:1 square) with chosen crop mode (center, blur, custom pan),
+ * burns in synchronized viral subtitle captions, and exports a genuine full-length MP4/WebM video file.
  */
 export async function renderClipToBlob(
   clip: Clip,
@@ -16,7 +18,7 @@ export async function renderClipToBlob(
 ): Promise<{ blob: Blob; url: string; filename: string }> {
   return new Promise(async (resolve, reject) => {
     try {
-      onProgress?.(5, 'Initializing video engine...');
+      onProgress?.(5, 'Preparing video source and audio tracks...');
 
       const aspect = clip.aspectRatio || '9:16';
       let width = 1080;
@@ -30,68 +32,119 @@ export async function renderClipToBlob(
         height = 1080;
       }
 
-      // Create offscreen canvas for rendering frames
+      // Create offscreen canvas for frame compositing
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { alpha: false });
 
       if (!ctx) {
-        throw new Error('Canvas 2D context not supported');
+        throw new Error('Canvas 2D rendering context is not supported in this browser.');
       }
 
-      // Setup audio oscillator/synthesizer if available to include real audio track
+      // Setup HTML5 video element to read actual user video
+      const videoEl = document.createElement('video');
+      videoEl.crossOrigin = 'anonymous';
+      videoEl.playsInline = true;
+      videoEl.muted = false; // We will route audio through Web Audio
+      videoEl.volume = 1.0;
+      videoEl.preload = 'auto';
+
+      const videoSrc = video?.previewUrl || '';
+      if (!videoSrc) {
+        throw new Error('No video source file found. Please upload or load a video first.');
+      }
+      videoEl.src = videoSrc;
+
+      // Wait for video metadata to load
+      await new Promise<void>((res, rej) => {
+        const onLoaded = () => {
+          videoEl.removeEventListener('loadedmetadata', onLoaded);
+          videoEl.removeEventListener('error', onErr);
+          res();
+        };
+        const onErr = () => {
+          videoEl.removeEventListener('loadedmetadata', onLoaded);
+          videoEl.removeEventListener('error', onErr);
+          rej(new Error('Failed to decode source video file. Check format support.'));
+        };
+        if (videoEl.readyState >= 1) {
+          res();
+        } else {
+          videoEl.addEventListener('loadedmetadata', onLoaded);
+          videoEl.addEventListener('error', onErr);
+        }
+      });
+
+      const videoDuration = videoEl.duration || clip.end || 60;
+      const startSec = Math.max(0, Math.min(clip.start, videoDuration - 0.5));
+      const endSec = Math.min(videoDuration, Math.max(startSec + 1, clip.end || startSec + clip.duration));
+      const totalClipSec = Math.max(1, endSec - startSec);
+
+      onProgress?.(10, `Seeking video to start marker (${startSec.toFixed(1)}s)...`);
+
+      // Seek video element to start timestamp
+      await new Promise<void>((res) => {
+        const onSeeked = () => {
+          videoEl.removeEventListener('seeked', onSeeked);
+          res();
+        };
+        videoEl.currentTime = startSec;
+        videoEl.addEventListener('seeked', onSeeked, { once: true });
+      });
+
+      // Setup audio routing via Web Audio to capture clear audio without speaker feedback
       let audioCtx: AudioContext | null = null;
       let dest: MediaStreamAudioDestinationNode | null = null;
-      let oscillator: OscillatorNode | null = null;
-      let gainNode: GainNode | null = null;
+      let audioTracks: MediaStreamTrack[] = [];
 
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {
           audioCtx = new AudioContextClass();
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
           dest = audioCtx.createMediaStreamDestination();
-          oscillator = audioCtx.createOscillator();
-          gainNode = audioCtx.createGain();
-          
-          oscillator.type = 'sine';
-          oscillator.frequency.setValueAtTime(220, audioCtx.currentTime);
-          gainNode.gain.setValueAtTime(0.02, audioCtx.currentTime); // subtle ambient tone
-          
-          oscillator.connect(gainNode);
-          gainNode.connect(dest);
-          oscillator.start();
+          const source = audioCtx.createMediaElementSource(videoEl);
+          source.connect(dest);
+          // Connect to destination stream only, not audioCtx.destination (keeps it silent during rendering)
+          audioTracks = dest.stream.getAudioTracks();
         }
       } catch (audioErr) {
-        console.warn('Web Audio init skipped:', audioErr);
+        console.warn('Web Audio capture fallback:', audioErr);
+        try {
+          if ((videoEl as any).captureStream) {
+            const elStream = (videoEl as any).captureStream();
+            audioTracks = elStream.getAudioTracks();
+          } else if ((videoEl as any).mozCaptureStream) {
+            const elStream = (videoEl as any).mozCaptureStream();
+            audioTracks = elStream.getAudioTracks();
+          }
+        } catch {}
       }
 
       // Capture canvas stream at 30 FPS
       const canvasStream = canvas.captureStream(30);
-      let combinedStream = canvasStream;
+      const combinedTracks = [...canvasStream.getVideoTracks(), ...audioTracks];
+      const combinedStream = new MediaStream(combinedTracks);
 
-      if (dest && dest.stream.getAudioTracks().length > 0) {
-        combinedStream = new MediaStream([
-          ...canvasStream.getVideoTracks(),
-          ...dest.stream.getAudioTracks(),
-        ]);
+      // Determine best supported recording format
+      let mimeType = 'video/mp4';
+      if (!MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/webm;codecs=vp9,opus';
       }
-
-      // Supported mime types
-      let mimeType = 'video/webm;codecs=vp9,opus';
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         mimeType = 'video/webm;codecs=vp8,opus';
       }
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         mimeType = 'video/webm';
       }
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'video/mp4';
-      }
 
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : undefined,
-        videoBitsPerSecond: 4000000, // 4 Mbps crisp quality
+        videoBitsPerSecond: 8_000_000, // 8 Mbps high-quality video encoding
+        audioBitsPerSecond: 192_000,
       });
 
       const chunks: Blob[] = [];
@@ -101,228 +154,293 @@ export async function renderClipToBlob(
         }
       };
 
-      mediaRecorder.onstop = () => {
-        if (oscillator) {
-          try {
-            oscillator.stop();
-          } catch {}
-        }
+      let isFinished = false;
+      let animFrameId: number | null = null;
+      let renderInterval: any = null;
+
+      const cleanup = () => {
+        isFinished = true;
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+        if (renderInterval) clearInterval(renderInterval);
+        try {
+          videoEl.pause();
+          videoEl.removeAttribute('src');
+          videoEl.load();
+        } catch {}
         if (audioCtx && audioCtx.state !== 'closed') {
           try {
             audioCtx.close();
           } catch {}
         }
+      };
 
+      mediaRecorder.onstop = () => {
+        cleanup();
         const isMp4 = mimeType.includes('mp4');
         const finalBlob = new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' });
         const url = URL.createObjectURL(finalBlob);
-        const safeTitle = (clip.title || 'short').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 25);
+        const safeTitle = (clip.title || 'short').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
         const filename = `ShortsForge_Clip_${String(clip.rank).padStart(2, '0')}_${aspect.replace(':', 'x')}_${safeTitle}.${isMp4 ? 'mp4' : 'webm'}`;
 
-        onProgress?.(100, 'Render complete!');
+        onProgress?.(100, 'Video rendered successfully!');
         resolve({ blob: finalBlob, url, filename });
       };
 
-      mediaRecorder.start(100);
-      onProgress?.(15, 'Rendering video frames & dynamic captions...');
+      // Start recording
+      mediaRecorder.start(250);
+      onProgress?.(15, `Rendering full ${totalClipSec.toFixed(1)}s clip with real video frames & audio...`);
 
-      const durationSec = Math.max(1, Math.min(clip.duration || (clip.end - clip.start), 120));
-      const renderDurationMs = Math.min(3500, Math.max(1500, durationSec * 60)); // Fast preview recording
-      const startTime = performance.now();
+      // Draw single frame to canvas
+      const vWidth = videoEl.videoWidth || 1920;
+      const vHeight = videoEl.videoHeight || 1080;
+      const cropMode = clip.cropMode || 'center';
+      const panFactor = Math.max(0, Math.min(100, clip.customPanPercent ?? 50)) / 100;
 
-      // Relevant transcript segments
+      // Filter transcript segments for this clip
       const relevantSegments = transcript?.segments?.filter(
-        (s) => s.end >= clip.start && s.start <= clip.end
+        (s) => s.end >= startSec && s.start <= endSec
       ) || [];
 
-      const renderInterval = setInterval(() => {
-        const elapsed = performance.now() - startTime;
-        const renderProgress = Math.min(1, elapsed / renderDurationMs);
-        const currentSimulatedSec = clip.start + renderProgress * durationSec;
+      const drawFrame = () => {
+        if (isFinished) return;
 
-        onProgress?.(
-          Math.min(95, Math.floor(15 + renderProgress * 80)),
-          `Rendering ${aspect} • ${(currentSimulatedSec - clip.start).toFixed(1)}s / ${durationSec.toFixed(1)}s`
-        );
+        const curTime = videoEl.currentTime;
+        const progressFrac = Math.max(0, Math.min(1, (curTime - startSec) / totalClipSec));
 
-        // Find active subtitle segment
-        const activeSegment = relevantSegments.find(
-          (s) => currentSimulatedSec >= s.start && currentSimulatedSec <= s.end
-        ) || relevantSegments[Math.floor(renderProgress * relevantSegments.length)] || null;
-
-        // --- DRAW FRAME ON CANVAS ---
-        // 1. Background Gradient / Studio
-        const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-        bgGrad.addColorStop(0, '#09090b');
-        bgGrad.addColorStop(0.5, '#18181b');
-        bgGrad.addColorStop(1, '#09090b');
-        ctx.fillStyle = bgGrad;
+        // 1. Draw Background
+        ctx.fillStyle = '#09090b';
         ctx.fillRect(0, 0, width, height);
 
-        // Studio glow
-        const glowGrad = ctx.createRadialGradient(
-          width / 2,
-          height * 0.4,
-          50,
-          width / 2,
-          height * 0.4,
-          width * 0.7
-        );
-        glowGrad.addColorStop(0, 'rgba(245, 158, 11, 0.18)');
-        glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = glowGrad;
-        ctx.fillRect(0, 0, width, height);
+        // 2. Draw Real Video Frame according to aspect ratio and crop strategy
+        if (aspect === '9:16') {
+          // Vertical 1080x1920 from source video
+          const targetAspect = 9 / 16;
+          const srcAspect = vWidth / vHeight;
 
-        // 2. Top Header Bar
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-        ctx.fillRect(0, 0, width, 120);
+          if (cropMode === 'blur') {
+            // Blurred full background
+            ctx.save();
+            ctx.filter = 'blur(24px) brightness(0.55)';
+            ctx.drawImage(videoEl, 0, 0, width, height);
+            ctx.restore();
 
-        // Brand Pill
+            // Fitted foreground in center
+            const fitH = width / srcAspect;
+            const fitY = (height - fitH) / 2;
+            ctx.drawImage(videoEl, 0, fitY, width, fitH);
+          } else {
+            // Cropped full vertical fill
+            let sw = vWidth;
+            let sh = vHeight;
+            let sx = 0;
+            let sy = 0;
+
+            if (srcAspect > targetAspect) {
+              // Video is wider than 9:16 (standard 16:9 widescreen)
+              sw = vHeight * targetAspect;
+              sh = vHeight;
+              sy = 0;
+              if (cropMode === 'custom') {
+                sx = (vWidth - sw) * panFactor;
+              } else {
+                sx = (vWidth - sw) / 2; // Center crop
+              }
+            } else {
+              // Video is taller than 9:16
+              sw = vWidth;
+              sh = vWidth / targetAspect;
+              sx = 0;
+              sy = (vHeight - sh) / 2;
+            }
+
+            ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, width, height);
+          }
+        } else if (aspect === '1:1') {
+          // Square 1080x1080
+          const minDim = Math.min(vWidth, vHeight);
+          let sx = (vWidth - minDim) / 2;
+          let sy = (vHeight - minDim) / 2;
+          if (cropMode === 'custom' && vWidth > vHeight) {
+            sx = (vWidth - minDim) * panFactor;
+          }
+          ctx.drawImage(videoEl, sx, sy, minDim, minDim, 0, 0, width, height);
+        } else {
+          // 16:9 Landscape (1920x1080)
+          ctx.drawImage(videoEl, 0, 0, width, height);
+        }
+
+        // 3. Top Header Card (Viral pill & clip number)
+        const topGrad = ctx.createLinearGradient(0, 0, 0, 180);
+        topGrad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
+        topGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = topGrad;
+        ctx.fillRect(0, 0, width, 180);
+
+        // Clip Rank Pill
         ctx.fillStyle = '#f59e0b';
         ctx.beginPath();
-        ctx.roundRect(40, 36, 170, 48, 10);
+        ctx.roundRect(40, 36, 160, 48, 12);
         ctx.fill();
 
         ctx.fillStyle = '#09090b';
-        ctx.font = 'bold 22px system-ui, sans-serif';
-        ctx.fillText(`CLIP #${clip.rank}`, 60, 68);
+        ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`CLIP #${clip.rank}`, 120, 68);
 
         // Viral Score Badge
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
         ctx.beginPath();
-        ctx.roundRect(width - 240, 36, 200, 48, 10);
+        ctx.roundRect(width - 240, 36, 200, 48, 12);
         ctx.fill();
 
         ctx.fillStyle = '#fef08a';
-        ctx.font = 'bold 20px system-ui, sans-serif';
-        ctx.fillText(`🔥 ${clip.viral_score}% VIRAL`, width - 225, 68);
-
-        // 3. Central Speaker Video Simulation Frame
-        const frameW = aspect === '9:16' ? width * 0.88 : width * 0.75;
-        const frameH = aspect === '9:16' ? height * 0.45 : height * 0.55;
-        const frameX = (width - frameW) / 2;
-        const frameY = aspect === '9:16' ? height * 0.15 : height * 0.18;
-
-        // Card Container
-        ctx.fillStyle = '#1c1917';
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.roundRect(frameX, frameY, frameW, frameH, 24);
-        ctx.fill();
-        ctx.stroke();
-
-        // Speaker Avatar / Silhouette
-        const isAlex = (activeSegment?.speaker || 'Alex Rivera').toLowerCase().includes('alex') || (Math.sin(elapsed / 800) > 0);
-        const speakerColor = isAlex ? '#3b82f6' : '#ec4899';
-        const speakerName = activeSegment?.speaker || (isAlex ? 'Alex Rivera' : 'Sarah Chen');
-
-        // Speaker Portrait
-        ctx.fillStyle = speakerColor;
-        ctx.beginPath();
-        ctx.arc(frameX + frameW / 2, frameY + frameH * 0.4, 110, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Speaker Icon initials
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 64px system-ui, sans-serif';
+        ctx.font = 'bold 20px system-ui, -apple-system, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(isAlex ? 'AR' : 'SC', frameX + frameW / 2, frameY + frameH * 0.4 + 22);
+        ctx.fillText(`🔥 ${clip.viral_score}% VIRAL`, width - 140, 68);
 
-        // Speaker Label Pill
-        ctx.fillStyle = 'rgba(0,0,0,0.75)';
-        ctx.beginPath();
-        ctx.roundRect(frameX + frameW / 2 - 160, frameY + frameH * 0.72, 320, 54, 14);
-        ctx.fill();
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 24px system-ui, sans-serif';
-        ctx.fillText(`🎙️ ${speakerName}`, frameX + frameW / 2, frameY + frameH * 0.72 + 36);
+        // 4. Burned-in High-Retention Subtitles
+        const activeSegment = relevantSegments.find(
+          (s) => curTime >= s.start && curTime <= s.end
+        ) || null;
 
-        // 4. Dynamic Audio Waveforms (Pulsing)
-        const waveY = frameY + frameH + (aspect === '9:16' ? 50 : 30);
-        const barCount = 32;
-        const barW = (frameW - (barCount * 6)) / barCount;
+        const subtitleText = activeSegment?.text || (curTime - startSec < 4 ? (clip.hook || clip.title) : '');
 
-        for (let i = 0; i < barCount; i++) {
-          const noise = Math.sin(elapsed * 0.01 + i * 0.4) * Math.cos(elapsed * 0.007 + i);
-          const barH = Math.max(12, Math.abs(noise) * 75);
-          const bx = frameX + i * (barW + 6);
-          const by = waveY + 40 - barH / 2;
+        if (subtitleText) {
+          const captionBoxW = width * 0.92;
+          const captionBoxX = (width - captionBoxW) / 2;
+          const captionY = aspect === '9:16' ? height * 0.72 : height * 0.76;
 
-          ctx.fillStyle = i % 2 === 0 ? '#f59e0b' : '#fbbf24';
+          // Word wrap subtitle lines
+          const words = subtitleText.split(' ');
+          const lines: string[] = [];
+          let currentLine = '';
+
+          words.forEach((w) => {
+            if ((currentLine + ' ' + w).trim().length <= 26) {
+              currentLine = (currentLine ? currentLine + ' ' : '') + w;
+            } else {
+              if (currentLine) lines.push(currentLine);
+              currentLine = w;
+            }
+          });
+          if (currentLine) lines.push(currentLine);
+
+          const boxH = Math.max(100, lines.length * 55 + 40);
+
+          // Subtitle pill container
+          ctx.fillStyle = 'rgba(9, 9, 11, 0.88)';
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+          ctx.lineWidth = 3;
           ctx.beginPath();
-          ctx.roundRect(bx, by, barW, barH, 4);
+          ctx.roundRect(captionBoxX, captionY, captionBoxW, boxH, 20);
           ctx.fill();
+          ctx.stroke();
+
+          // Speaker tag if present
+          if (activeSegment?.speaker) {
+            ctx.fillStyle = '#f59e0b';
+            ctx.font = 'bold 18px system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`🎙️ ${activeSegment.speaker.toUpperCase()}`, captionBoxX + 24, captionY + 32);
+          }
+
+          // Draw subtitle text
+          lines.forEach((line, idx) => {
+            const lineY = captionY + (activeSegment?.speaker ? 68 : 55) + idx * 48;
+            ctx.font = 'bold 36px system-ui, -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+
+            // Text shadow for high readability
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.fillText(line, width / 2 + 2, lineY + 2);
+
+            // Active yellow highlight for the first line, crisp white for following lines
+            ctx.fillStyle = idx === 0 ? '#fef08a' : '#ffffff';
+            ctx.fillText(line, width / 2, lineY);
+          });
         }
 
-        // 5. Burned-in Viral Subtitle Box (Auto-Wrapped & Highlighted)
-        const captionY = waveY + (aspect === '9:16' ? 140 : 80);
-        const captionBoxW = width * 0.9;
-        const captionBoxX = (width - captionBoxW) / 2;
+        // 5. Bottom Progress Bar & Watermark
+        const botGrad = ctx.createLinearGradient(0, height - 100, 0, height);
+        botGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        botGrad.addColorStop(1, 'rgba(0, 0, 0, 0.85)');
+        ctx.fillStyle = botGrad;
+        ctx.fillRect(0, height - 100, width, 100);
 
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-        ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(captionBoxX, captionY, captionBoxW, 220, 20);
-        ctx.fill();
-        ctx.stroke();
+        // Progress bar background
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.fillRect(40, height - 40, width - 80, 8);
 
-        const subtitleText = activeSegment?.text || clip.hook || clip.title;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 36px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-
-        // Word wrapping for large animated captions
-        const words = subtitleText.split(' ');
-        let line1 = '';
-        let line2 = '';
-        let line3 = '';
-
-        words.forEach((w) => {
-          if (line1.length + w.length < 24) {
-            line1 += (line1 ? ' ' : '') + w;
-          } else if (line2.length + w.length < 24) {
-            line2 += (line2 ? ' ' : '') + w;
-          } else if (line3.length + w.length < 24) {
-            line3 += (line3 ? ' ' : '') + w;
-          }
-        });
-
-        // Highlight active word in yellow
-        ctx.fillStyle = '#fef08a';
-        ctx.fillText(line1 || subtitleText.slice(0, 30), width / 2, captionY + 65);
-        ctx.fillStyle = '#ffffff';
-        if (line2) ctx.fillText(line2, width / 2, captionY + 125);
-        if (line3) ctx.fillText(line3, width / 2, captionY + 185);
-
-        // 6. Bottom Progress & Watermark
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.fillRect(0, height - 80, width, 80);
-
-        // Progress bar line
-        ctx.fillStyle = '#3f3f46';
-        ctx.fillRect(40, height - 50, width - 80, 8);
+        // Progress bar filled
         ctx.fillStyle = '#f59e0b';
-        ctx.fillRect(40, height - 50, (width - 80) * renderProgress, 8);
+        ctx.fillRect(40, height - 40, (width - 80) * progressFrac, 8);
 
-        // Watermark / Brand
-        ctx.fillStyle = '#a1a1aa';
-        ctx.font = 'bold 20px system-ui, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('⚡ SHORTSFORGE STUDIO', 40, height - 20);
-
+        // Timestamp counter
+        const elapsedSec = curTime - startSec;
+        ctx.fillStyle = '#d4d4d8';
+        ctx.font = 'bold 18px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText(`${(currentSimulatedSec - clip.start).toFixed(1)}s / ${durationSec.toFixed(1)}s`, width - 40, height - 20);
+        ctx.fillText(
+          `${elapsedSec.toFixed(1)}s / ${totalClipSec.toFixed(1)}s`,
+          width - 40,
+          height - 54
+        );
 
-        // Finish recording check
-        if (elapsed >= renderDurationMs) {
-          clearInterval(renderInterval);
-          if (mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
+        // ShortsForge Studio Branding
+        ctx.fillStyle = '#a1a1aa';
+        ctx.font = 'bold 18px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('⚡ SHORTSFORGE AI', 40, height - 54);
+
+        onProgress?.(
+          Math.min(99, Math.floor(15 + progressFrac * 80)),
+          `Rendering ${aspect} • ${elapsedSec.toFixed(1)}s / ${totalClipSec.toFixed(1)}s`
+        );
+
+        // Check if finished
+        if (curTime >= endSec || videoEl.ended) {
+          if (!isFinished) {
+            isFinished = true;
+            if (mediaRecorder.state !== 'inactive') {
+              mediaRecorder.stop();
+            }
           }
+          return;
         }
-      }, 33); // ~30 fps interval
+
+        animFrameId = requestAnimationFrame(drawFrame);
+      };
+
+      // Start playing video to drive the rendering
+      videoEl.onplay = () => {
+        drawFrame();
+      };
+
+      videoEl.onended = () => {
+        if (!isFinished && mediaRecorder.state !== 'inactive') {
+          isFinished = true;
+          mediaRecorder.stop();
+        }
+      };
+
+      // Play video to start recording
+      try {
+        await videoEl.play();
+      } catch (playErr) {
+        // If autoplay policy blocked audio playback, fallback to muted playback for frames
+        videoEl.muted = true;
+        await videoEl.play();
+      }
+
+      // Safety timeout in case video stalls
+      const maxWaitMs = (totalClipSec + 5) * 1000;
+      setTimeout(() => {
+        if (!isFinished && mediaRecorder.state !== 'inactive') {
+          isFinished = true;
+          mediaRecorder.stop();
+        }
+      }, maxWaitMs);
+
     } catch (err) {
       reject(err);
     }
@@ -358,3 +476,4 @@ export function generateClipSRT(clip: Clip, transcript?: TranscriptData): string
     })
     .join('\n');
 }
+

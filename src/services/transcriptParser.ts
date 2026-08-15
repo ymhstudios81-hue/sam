@@ -327,3 +327,156 @@ export function parseTranscript(rawText: string, videoDuration?: number): Transc
     totalDuration
   };
 }
+
+/**
+ * Smart algorithmic transcript analyzer when Claude API is not configured or for offline fallback.
+ * Extracts N high-retention clips distributed across the transcript matching viral criteria.
+ */
+export function generateSmartTranscriptClips(
+  segments: TranscriptSegment[],
+  clipCount: number = 5,
+  videoDuration?: number,
+  aspectRatio: string = '9:16',
+  cropMode: string = 'center'
+): any[] {
+  if (!segments || segments.length === 0) return [];
+
+  const totalDuration = videoDuration || segments[segments.length - 1]?.end || 180;
+  const targetDurationMin = 25;
+  const targetDurationMax = 75;
+
+  interface Candidate {
+    startIndex: number;
+    endIndex: number;
+    start: number;
+    end: number;
+    duration: number;
+    title: string;
+    hook: string;
+    reason: string;
+    viral_score: number;
+    topics: string[];
+  }
+
+  const candidates: Candidate[] = [];
+
+  const viralKeywords = [
+    'secret', 'insane', 'bankruptcy', 'million', 'billion', 'mistake', 'never', 'truth',
+    'scam', 'unbelievable', 'worst', 'best', 'money', 'failed', 'rule', 'advice', 'trap',
+    'bet', 'died', 'fired', 'quit', 'lost', 'won', 'crazy', 'disaster', 'revenue', 'hacked'
+  ];
+
+  for (let i = 0; i < segments.length; i++) {
+    const startSeg = segments[i];
+    let combinedText = '';
+    let currentEnd = startSeg.end;
+
+    for (let j = i; j < segments.length; j++) {
+      const seg = segments[j];
+      combinedText += (combinedText ? ' ' : '') + seg.text;
+      currentEnd = seg.end;
+      const dur = currentEnd - startSeg.start;
+
+      if (dur >= targetDurationMin && dur <= targetDurationMax) {
+        let score = 75;
+        const lowerText = combinedText.toLowerCase();
+
+        if (startSeg.text.includes('?') || startSeg.text.includes('!')) score += 6;
+        if (viralKeywords.some((kw) => startSeg.text.toLowerCase().includes(kw))) score += 8;
+
+        const keywordMatches = viralKeywords.filter((kw) => lowerText.includes(kw)).length;
+        score += Math.min(12, keywordMatches * 3);
+
+        if (/\$[\d,]+|\d+%/g.test(combinedText)) score += 5;
+
+        const sentences = combinedText.split(/[.!?]+/).filter((s) => s.trim().length > 0);
+        const hookText = sentences[0]?.trim() || combinedText.slice(0, 80);
+
+        let title = hookText
+          .replace(/[^\w\s]/g, '')
+          .split(' ')
+          .slice(0, 6)
+          .join(' ');
+        if (!title) title = `Viral Segment #${candidates.length + 1}`;
+
+        candidates.push({
+          startIndex: i,
+          endIndex: j,
+          start: parseFloat(startSeg.start.toFixed(2)),
+          end: parseFloat(currentEnd.toFixed(2)),
+          duration: parseFloat(dur.toFixed(2)),
+          title: title.charAt(0).toUpperCase() + title.slice(1),
+          hook: hookText.slice(0, 110),
+          reason: `High curiosity gap with ${keywordMatches > 0 ? 'high-stakes storytelling' : 'dynamic speech'} (${dur.toFixed(0)}s duration).`,
+          viral_score: Math.min(98, Math.max(82, score)),
+          topics: ['insights', 'mindset', 'strategy']
+        });
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.viral_score - a.viral_score);
+
+  const selected: Candidate[] = [];
+  for (const cand of candidates) {
+    if (selected.length >= clipCount) break;
+    const overlaps = selected.some(
+      (s) => Math.max(s.start, cand.start) < Math.min(s.end, cand.end) - 5
+    );
+    if (!overlaps) {
+      selected.push(cand);
+    }
+  }
+
+  if (selected.length < clipCount && segments.length > 0) {
+    const chunkDur = Math.max(25, totalDuration / clipCount);
+    for (let k = 0; k < clipCount; k++) {
+      if (selected.length >= clipCount) break;
+      const targetStart = k * chunkDur;
+      const targetEnd = Math.min(totalDuration, targetStart + chunkDur);
+
+      const matchingSegs = segments.filter((s) => s.end >= targetStart && s.start <= targetEnd);
+      if (matchingSegs.length > 0) {
+        const segStart = matchingSegs[0].start;
+        const segEnd = matchingSegs[matchingSegs.length - 1].end;
+        const text = matchingSegs.map((s) => s.text).join(' ');
+
+        const exists = selected.some((s) => Math.abs(s.start - segStart) < 8);
+        if (!exists) {
+          selected.push({
+            startIndex: 0,
+            endIndex: 0,
+            start: parseFloat(segStart.toFixed(2)),
+            end: parseFloat(segEnd.toFixed(2)),
+            duration: parseFloat((segEnd - segStart).toFixed(2)),
+            title: text.split(' ').slice(0, 5).join(' ') || `Key Takeaway #${k + 1}`,
+            hook: text.slice(0, 100),
+            reason: `Cohesive narrative block with high audience retention potential.`,
+            viral_score: Math.max(78, 94 - k * 2),
+            topics: ['highlights', 'podcast']
+          });
+        }
+      }
+    }
+  }
+
+  selected.sort((a, b) => b.viral_score - a.viral_score);
+  return selected.slice(0, clipCount).map((c, i) => ({
+    id: 'clip_' + Math.random().toString(36).substring(2, 9),
+    rank: i + 1,
+    start: c.start,
+    end: c.end,
+    duration: c.duration,
+    title: c.title,
+    hook: c.hook,
+    reason: c.reason,
+    viral_score: c.viral_score,
+    topics: c.topics,
+    selected: true,
+    aspectRatio,
+    cropMode,
+    customPanPercent: 50.0,
+    status: 'idle'
+  }));
+}
+

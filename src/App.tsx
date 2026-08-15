@@ -12,7 +12,7 @@ import { SettingsView } from './components/Settings/SettingsView';
 import { WindowsGuideModal } from './components/WindowsGuideModal';
 
 import { Project, VideoMetadata, TranscriptData, Clip, RenderJob, AppSettings, CropMode, AspectRatioFormat } from './types';
-import { parseTranscript } from './services/transcriptParser';
+import { parseTranscript, generateSmartTranscriptClips } from './services/transcriptParser';
 import { SAMPLE_PODCAST_SRT, SAMPLE_PROJECT_NAME } from './services/sampleData';
 import { renderClipToBlob, generateClipSRT } from './services/videoRenderer';
 import { AlertTriangle, CheckCircle2, Download, Film, Sparkles, Terminal } from 'lucide-react';
@@ -376,15 +376,18 @@ export default function App() {
     }
 
     setIsAnalyzing(true);
-    showNotification('Claude is evaluating full transcript for viral hooks and storytelling...', 'info');
+    showNotification(`Claude is evaluating transcript to extract TOP ${clipCount} viral clips...`, 'info');
 
     try {
-      // 1. Attempt server-side Anthropic API endpoint
+      // 1. Attempt server-side Anthropic / smart analysis API endpoint
       const response = await fetch(`/api/projects/${activeProject.id}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clip_count: clipCount,
+          segments: activeProject.transcript.segments,
+          video_duration: activeProject.video?.duration,
+          api_key_override: settings.anthropicApiKey,
           model_override: settings.claudeModel,
         }),
       });
@@ -400,104 +403,23 @@ export default function App() {
             updatedAt: new Date().toISOString(),
           }));
           setIsAnalyzing(false);
-          showNotification(`Claude discovered ${result.clips.length} high-viral moments!`, 'success');
+          showNotification(`Discovered ${result.clips.length} high-viral moments!`, 'success');
           return;
         }
       }
-    } catch {
-      // Fallback to client-side intelligent editorial analysis
+    } catch (err) {
+      console.warn('Backend analyze API error, using dynamic client-side engine:', err);
     }
 
-    // High-retention editorial clips analysis matching Claude criteria
+    // Client-side high-retention smart editorial clips analysis matching Claude criteria
     setTimeout(() => {
-      const defaultFmt = settings.aspectRatio || '9:16';
-      const generatedClips: Clip[] = [
-        {
-          id: 'clip_01',
-          rank: 1,
-          start: 13.0,
-          end: 68.0,
-          duration: 55.0,
-          title: "Betting Everything on Monday's Payroll",
-          hook: "Our lead investor pulled out on Thanksgiving night over a single text message with $4,200 left.",
-          reason: "Extreme emotional stakes and personal risk narrative. The transition from 3 AM despair to betting a personal 401k creates unbeatable watch-time retention.",
-          viral_score: 96,
-          topics: ['startup', 'bankruptcy', 'risk'],
-          selected: true,
-          aspectRatio: defaultFmt,
-          cropMode: settings.cropMode,
-          customPanPercent: 50.0,
-          status: 'idle' as const,
-        },
-        {
-          id: 'clip_02',
-          rank: 2,
-          start: 74.0,
-          end: 122.0,
-          duration: 48.0,
-          title: 'Why Whiteboard Coding Interviews Are a Scam',
-          hook: "Here is the most controversial opinion I hold: traditional technical interviews are a total scam that select for posers.",
-          reason: "High controversy and industry myth-busting. Attacks big tech convention directly, sparking debate and comments in the first 5 seconds.",
-          viral_score: 93,
-          topics: ['tech', 'interviews', 'controversy'],
-          selected: true,
-          aspectRatio: defaultFmt,
-          cropMode: settings.cropMode,
-          customPanPercent: 50.0,
-          status: 'idle' as const,
-        },
-        {
-          id: 'clip_03',
-          rank: 3,
-          start: 125.0,
-          end: 178.0,
-          duration: 53.0,
-          title: 'A Solo Developer with AI Replaces a 50-Person Agency',
-          hook: "AI isn't going to replace developers, but a solo developer with AI is going to replace a 50-person agency.",
-          reason: "Immediate paradigm shift statement with concrete proof. The 72-hour junior designer SaaS case study makes this highly shareable.",
-          viral_score: 91,
-          topics: ['ai', 'future of work', 'productivity'],
-          selected: true,
-          aspectRatio: defaultFmt,
-          cropMode: settings.cropMode,
-          customPanPercent: 50.0,
-          status: 'idle' as const,
-        },
-        {
-          id: 'clip_04',
-          rank: 4,
-          start: 142.0,
-          end: 170.0,
-          duration: 28.0,
-          title: 'Your Hourly Agency Model is Dead',
-          hook: "If you are still charging clients by the hour for manual boilerplate code in 2025, your business model is already dead.",
-          reason: "Harsh wake-up call statement with punchy delivery, perfect for short attention spans under 30 seconds.",
-          viral_score: 87,
-          topics: ['business', 'consulting'],
-          selected: true,
-          aspectRatio: defaultFmt,
-          cropMode: settings.cropMode,
-          customPanPercent: 50.0,
-          status: 'idle' as const,
-        },
-        {
-          id: 'clip_05',
-          rank: 5,
-          start: 16.0,
-          end: 62.0,
-          duration: 46.0,
-          title: 'Financial Suicide to $600k ARR in 48 Hours',
-          hook: "My own lawyer told me I was committing financial suicide.",
-          reason: "Dramatic conflict with authority followed by massive triumph payoff. Closes with a powerful philosophical quote.",
-          viral_score: 85,
-          topics: ['success', 'mindset', 'money'],
-          selected: true,
-          aspectRatio: defaultFmt,
-          cropMode: settings.cropMode,
-          customPanPercent: 50.0,
-          status: 'idle' as const,
-        },
-      ].slice(0, clipCount);
+      const generatedClips = generateSmartTranscriptClips(
+        activeProject.transcript?.segments || [],
+        clipCount,
+        activeProject.video?.duration,
+        settings.aspectRatio || '9:16',
+        settings.cropMode || 'center'
+      );
 
       updateActiveProject((prev) => ({
         ...prev,
@@ -508,8 +430,8 @@ export default function App() {
       }));
 
       setIsAnalyzing(false);
-      showNotification(`Claude discovered ${generatedClips.length} high-viral moments!`, 'success');
-    }, 1800);
+      showNotification(`Discovered ${generatedClips.length} high-viral moments from transcript!`, 'success');
+    }, 1200);
   };
 
   // Toggle Clip Selection
@@ -744,8 +666,15 @@ export default function App() {
     showNotification('Project renamed.', 'success');
   };
 
-  const handleSaveSettings = (newSettings: Partial<AppSettings>) => {
+  const handleSaveSettings = async (newSettings: Partial<AppSettings>) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSettings),
+      });
+    } catch {}
     showNotification('Settings saved successfully.', 'success');
   };
 

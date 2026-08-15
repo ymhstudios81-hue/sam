@@ -21,7 +21,7 @@ export const ClaudeAnalyzeCard: React.FC<ClaudeAnalyzeCardProps> = ({
   isAnalyzing,
   hasClips,
 }) => {
-  const clipOptions = [3, 5, 10, 20];
+  const clipOptions = [3, 5, 8, 10, 15, 20];
   const canAnalyze = Boolean(transcript?.isTimestamped && transcript.segments.length > 0 && !isAnalyzing);
 
   return (
