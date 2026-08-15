@@ -1,0 +1,6 @@
+{
+  "name": "ShortsForge AI",
+  "description": "Local-first Windows AI video generator powered by Anthropic Claude and FFmpeg for converting long-form videos into multi-format shorts (9:16 vertical, 16:9 landscape, and 1:1 square).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
