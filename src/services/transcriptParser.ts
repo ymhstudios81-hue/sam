@@ -348,8 +348,7 @@ export function generateSmartTranscriptClips(
 
   const totalDuration = videoDuration || segments[segments.length - 1]?.end || 180;
   const isAutoDuration = durationMode === 'auto';
-  // In auto duration mode, allow stories of any natural duration (from 20s up to whole video/15 mins)
-  const targetDurationMin = isAutoDuration ? 20 : (minDuration || 25);
+  const targetDurationMin = isAutoDuration ? 15 : (minDuration || 20);
   const targetDurationMax = isAutoDuration ? Math.min(totalDuration, 900) : (maxDuration || 180);
 
   interface Candidate {
@@ -363,6 +362,7 @@ export function generateSmartTranscriptClips(
     reason: string;
     viral_score: number;
     topics: string[];
+    customPromptMatchCount: number;
   }
 
   const candidates: Candidate[] = [];
@@ -371,16 +371,32 @@ export function generateSmartTranscriptClips(
     'secret', 'insane', 'bankruptcy', 'million', 'billion', 'mistake', 'never', 'truth',
     'scam', 'unbelievable', 'worst', 'best', 'money', 'failed', 'rule', 'advice', 'trap',
     'bet', 'died', 'fired', 'quit', 'lost', 'won', 'crazy', 'disaster', 'revenue', 'hacked',
-    'story', 'lesson', 'happened', 'experience', 'decision', 'shocking', 'discovered'
+    'story', 'lesson', 'happened', 'experience', 'decision', 'shocking', 'discovered', 'hire',
+    'hiring', 'engineer', 'developer', 'startup', 'product', 'code', 'build', 'idea'
   ];
 
-  const customKeywords = customPrompt
-    ? customPrompt
-        .toLowerCase()
-        .replace(/[^\w\s]/g, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length > 3 && !['find', 'clip', 'clips', 'video', 'claude', 'make', 'want', 'please', 'about'].includes(w))
-    : [];
+  const stopWords = new Set([
+    'the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'what', 'when', 'where',
+    'which', 'who', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most',
+    'other', 'some', 'such', 'than', 'too', 'very', 'can', 'will', 'just', 'should',
+    'now', 'find', 'clip', 'clips', 'video', 'claude', 'make', 'want', 'please', 'about',
+    'extract', 'give', 'into', 'over', 'them', 'their', 'there', 'were', 'been', 'being',
+    'only', 'also', 'like', 'show', 'tell', 'need', 'must'
+  ]);
+
+  const cleanPrompt = (customPrompt || '').trim();
+  const rawWords = cleanPrompt
+    .toLowerCase()
+    .replace(/[^\w\s$]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+  const promptPhrases: string[] = [];
+  if (rawWords.length >= 2) {
+    for (let p = 0; p < rawWords.length - 1; p++) {
+      promptPhrases.push(`${rawWords[p]} ${rawWords[p + 1]}`);
+    }
+  }
 
   for (let i = 0; i < segments.length; i++) {
     const startSeg = segments[i];
@@ -395,34 +411,59 @@ export function generateSmartTranscriptClips(
 
       const endsWithPunctuation = /[.!?]$/.test(seg.text.trim());
 
-      if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 15)) {
-        let score = 75;
+      if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 10)) {
+        let score = 70;
         const lowerText = combinedText.toLowerCase();
+        let promptMatches = 0;
 
-        // Custom command matching bonus
-        if (customKeywords.length > 0) {
-          const customMatches = customKeywords.filter((kw) => lowerText.includes(kw)).length;
-          score += customMatches * 15;
+        if (rawWords.length > 0) {
+          for (const kw of rawWords) {
+            if (lowerText.includes(kw)) {
+              promptMatches += 1;
+              score += 25;
+            }
+          }
+
+          for (const phrase of promptPhrases) {
+            if (lowerText.includes(phrase)) {
+              promptMatches += 2;
+              score += 45;
+            }
+          }
+
+          if (cleanPrompt.length > 4 && lowerText.includes(cleanPrompt.toLowerCase())) {
+            promptMatches += 4;
+            score += 80;
+          }
         }
 
-        if (startSeg.text.includes('?') || startSeg.text.includes('!')) score += 6;
-        if (viralKeywords.some((kw) => startSeg.text.toLowerCase().includes(kw))) score += 8;
+        if (startSeg.text.includes('?') || startSeg.text.includes('!')) score += 5;
+        if (viralKeywords.some((kw) => startSeg.text.toLowerCase().includes(kw))) score += 6;
 
         const keywordMatches = viralKeywords.filter((kw) => lowerText.includes(kw)).length;
-        score += Math.min(12, keywordMatches * 3);
+        score += Math.min(10, keywordMatches * 2);
 
-        if (/\$[\d,]+|\d+%/g.test(combinedText)) score += 5;
-        if (endsWithPunctuation) score += 4;
+        if (/\$[\d,]+|\d+%/g.test(combinedText)) score += 4;
+        if (endsWithPunctuation) score += 3;
 
         const sentences = combinedText.split(/[.!?]+/).filter((s) => s.trim().length > 0);
         const hookText = sentences[0]?.trim() || combinedText.slice(0, 80);
 
         let title = hookText
-          .replace(/[^\w\s]/g, '')
+          .replace(/[^\w\s$]/g, '')
           .split(' ')
           .slice(0, 6)
           .join(' ');
         if (!title) title = `Viral Segment #${candidates.length + 1}`;
+
+        let reasonText = '';
+        if (cleanPrompt && promptMatches > 0) {
+          reasonText = `🎯 Directly matches instruction "${cleanPrompt.slice(0, 42)}..." with complete standalone story payoff (${dur.toFixed(0)}s).`;
+        } else if (cleanPrompt) {
+          reasonText = `High narrative cohesion and viral retention hook aligned with content guidelines (${dur.toFixed(0)}s).`;
+        } else {
+          reasonText = `Complete natural story narrative with strong opening hook (${dur.toFixed(0)}s).`;
+        }
 
         candidates.push({
           startIndex: i,
@@ -432,17 +473,25 @@ export function generateSmartTranscriptClips(
           duration: parseFloat(dur.toFixed(2)),
           title: title.charAt(0).toUpperCase() + title.slice(1),
           hook: hookText.slice(0, 110),
-          reason: customPrompt
-            ? `Matched instruction "${customPrompt.slice(0, 40)}..." with complete story narrative (${dur.toFixed(0)}s).`
-            : `Complete natural story narrative with high retention hook (${dur.toFixed(0)}s).`,
-          viral_score: Math.min(99, Math.max(80, score)),
-          topics: customKeywords.length > 0 ? customKeywords.slice(0, 3) : ['insights', 'mindset', 'strategy']
+          reason: reasonText,
+          viral_score: Math.min(99, Math.max(75, score)),
+          topics: rawWords.length > 0 ? rawWords.slice(0, 3) : ['insights', 'mindset', 'strategy'],
+          customPromptMatchCount: promptMatches
         });
       }
     }
   }
 
-  candidates.sort((a, b) => b.viral_score - a.viral_score);
+  if (rawWords.length > 0) {
+    candidates.sort((a, b) => {
+      if (b.customPromptMatchCount !== a.customPromptMatchCount) {
+        return b.customPromptMatchCount - a.customPromptMatchCount;
+      }
+      return b.viral_score - a.viral_score;
+    });
+  } else {
+    candidates.sort((a, b) => b.viral_score - a.viral_score);
+  }
 
   const selected: Candidate[] = [];
   for (const cand of candidates) {
@@ -478,16 +527,29 @@ export function generateSmartTranscriptClips(
             duration: parseFloat((segEnd - segStart).toFixed(2)),
             title: text.split(' ').slice(0, 5).join(' ') || `Key Takeaway #${k + 1}`,
             hook: text.slice(0, 100),
-            reason: `Cohesive narrative block with high audience retention potential.`,
+            reason: cleanPrompt
+              ? `🎯 Narrative segment evaluated for: "${cleanPrompt.slice(0, 35)}..."`
+              : `Cohesive narrative block with high audience retention potential.`,
             viral_score: Math.max(78, 94 - k * 2),
-            topics: ['highlights', 'podcast']
+            topics: ['highlights', 'podcast'],
+            customPromptMatchCount: 0
           });
         }
       }
     }
   }
 
-  selected.sort((a, b) => b.viral_score - a.viral_score);
+  if (rawWords.length > 0) {
+    selected.sort((a, b) => {
+      if (b.customPromptMatchCount !== a.customPromptMatchCount) {
+        return b.customPromptMatchCount - a.customPromptMatchCount;
+      }
+      return b.viral_score - a.viral_score;
+    });
+  } else {
+    selected.sort((a, b) => b.viral_score - a.viral_score);
+  }
+
   return selected.slice(0, clipCount).map((c, i) => ({
     id: 'clip_' + Math.random().toString(36).substring(2, 9),
     rank: i + 1,

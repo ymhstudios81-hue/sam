@@ -174,10 +174,26 @@ export const ClaudeAnalyzeCard: React.FC<ClaudeAnalyzeCardProps> = ({
               <textarea
                 value={customCommand}
                 onChange={(e) => setCustomCommand(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canAnalyze) {
+                    e.preventDefault();
+                    handleStartAnalysis();
+                  }
+                }}
                 placeholder="e.g. Find clips where Alex explains the $100M decision and the exact hiring formula. Make sure the entire story is captured with beginning and end."
                 rows={2}
                 className="w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700 text-xs text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-amber-500 transition resize-y font-sans leading-relaxed"
               />
+
+              {/* Active Prompt Indicator */}
+              {customCommand.trim().length > 0 && (
+                <div className="flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px]">
+                  <Sparkles className="w-3.5 h-3.5 flex-shrink-0 text-amber-400" />
+                  <span className="font-semibold">Active Filter:</span>
+                  <span className="truncate">"{customCommand.trim()}"</span>
+                  <span className="ml-auto text-[10px] text-neutral-400 font-mono hidden sm:inline">(Press Cmd/Ctrl+Enter to run)</span>
+                </div>
+              )}
 
               {/* Quick Preset Buttons */}
               <div className="flex flex-wrap items-center gap-1.5 mt-2">

@@ -54,6 +54,7 @@ export interface Clip {
   captionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
   showOverlays?: boolean; // show rank & viral score overlays
   showProgressBar?: boolean;
+  enable4kFilter?: boolean; // CapCut-style 4K HD Quality & Color Grade filter (Sharpen, S-curve contrast & vibrant saturation)
   status: 'idle' | 'queued' | 'rendering' | 'completed' | 'failed';
   renderProgress?: number;
   renderedVideoUrl?: string;
@@ -78,6 +79,7 @@ export interface RenderJob {
   includeCaptions?: boolean;
   captionStyle?: string;
   showOverlays?: boolean;
+  enable4kFilter?: boolean;
   status: RenderJobStatus;
   progress: number; // 0 to 100
   error?: string;
@@ -117,6 +119,7 @@ export interface AppSettings {
   defaultIncludeCaptions?: boolean;
   defaultCaptionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
   defaultShowOverlays?: boolean;
+  default4kFilter?: boolean;
   captionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
   includeDebugOverlays?: boolean;
   includeProgressBar?: boolean;

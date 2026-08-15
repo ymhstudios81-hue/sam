@@ -471,17 +471,31 @@ export default function App() {
     }));
   };
 
+  const handleToggle4kFilter = (clipId: string) => {
+    updateActiveProject((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => {
+        if (c.id === clipId) {
+          const current = c.enable4kFilter === true;
+          return { ...c, enable4kFilter: !current };
+        }
+        return c;
+      }),
+    }));
+  };
+
   const handleSaveClipFineTune = (updatedClip: Clip) => {
     updateActiveProject((prev) => ({
       ...prev,
       clips: prev.clips.map((c) => (c.id === updatedClip.id ? updatedClip : c)),
     }));
-    showNotification(`Updated timestamps & format for Clip #${updatedClip.rank}`, 'success');
+    showNotification(`Updated timestamps, 4K filter & format for Clip #${updatedClip.rank}`, 'success');
   };
 
   // Render Single Clip
   const handleGenerateSingle = async (clip: Clip) => {
     const targetFmt = clip.aspectRatio || settings.aspectRatio || '9:16';
+    const is4k = clip.enable4kFilter !== undefined ? clip.enable4kFilter : (settings.enable4kFilter ?? true);
     const jobId = 'job_' + Math.random().toString(36).substring(2, 9);
     const newJob: RenderJob = {
       id: jobId,
@@ -495,6 +509,7 @@ export default function App() {
       aspectRatio: targetFmt,
       cropMode: clip.cropMode,
       customPanPercent: clip.customPanPercent || 50.0,
+      enable4kFilter: is4k,
       status: 'processing',
       progress: 10.0,
       createdAt: new Date().toISOString(),
@@ -782,6 +797,7 @@ export default function App() {
                 onCropModeChange={handleCropModeChange}
                 onAspectRatioChange={handleAspectRatioChange}
                 onToggleCaptions={handleToggleCaptions}
+                onToggle4kFilter={handleToggle4kFilter}
                 onExportZip={handleExportZip}
                 isRenderingBatch={isRenderingBatch}
               />

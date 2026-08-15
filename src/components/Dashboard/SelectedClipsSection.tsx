@@ -14,6 +14,7 @@ interface SelectedClipsSectionProps {
   onCropModeChange: (clipId: string, mode: CropMode) => void;
   onAspectRatioChange?: (clipId: string, format: AspectRatioFormat) => void;
   onToggleCaptions?: (clipId: string) => void;
+  onToggle4kFilter?: (clipId: string) => void;
   onExportZip: () => void;
   isRenderingBatch: boolean;
 }
@@ -29,6 +30,7 @@ export const SelectedClipsSection: React.FC<SelectedClipsSectionProps> = ({
   onCropModeChange,
   onAspectRatioChange,
   onToggleCaptions,
+  onToggle4kFilter,
   onExportZip,
   isRenderingBatch,
 }) => {
@@ -103,6 +105,7 @@ export const SelectedClipsSection: React.FC<SelectedClipsSectionProps> = ({
             onCropModeChange={onCropModeChange}
             onAspectRatioChange={onAspectRatioChange}
             onToggleCaptions={onToggleCaptions}
+            onToggle4kFilter={onToggle4kFilter}
           />
         ))}
       </div>

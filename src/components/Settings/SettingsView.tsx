@@ -30,6 +30,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [defaultIncludeCaptions, setDefaultIncludeCaptions] = useState<boolean>(settings.defaultIncludeCaptions ?? true);
   const [defaultCaptionStyle, setDefaultCaptionStyle] = useState<'viral_yellow' | 'clean_white' | 'minimal' | 'none'>(settings.defaultCaptionStyle || 'viral_yellow');
   const [defaultShowOverlays, setDefaultShowOverlays] = useState<boolean>(settings.defaultShowOverlays ?? false);
+  const [enable4kFilter, setEnable4kFilter] = useState<boolean>(settings.enable4kFilter ?? true);
   const [videoQuality, setVideoQuality] = useState(settings.videoQuality);
   const [workspaceDir, setWorkspaceDir] = useState(settings.workspaceDir);
   const [isSaved, setIsSaved] = useState(false);
@@ -54,6 +55,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       defaultIncludeCaptions,
       defaultCaptionStyle,
       defaultShowOverlays,
+      enable4kFilter,
       videoQuality,
       workspaceDir,
       anthropicApiKeyConfigured: Boolean(apiKeyInput.trim() || settings.anthropicApiKeyConfigured),
@@ -299,6 +301,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }}
                 className="w-full px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-700 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
               />
+            </div>
+
+            {/* CapCut 4K Filter Default */}
+            <div>
+              <label className="text-xs font-semibold text-neutral-300 block mb-1">
+                CapCut 4K Quality & Color Grade Filter
+              </label>
+              <select
+                value={enable4kFilter ? 'true' : 'false'}
+                onChange={(e) => setEnable4kFilter(e.target.value === 'true')}
+                className="w-full px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-700 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
+              >
+                <option value="true">✨ Enabled (Unsharp Clarity + S-Curve Dynamic Saturation + 24 Mbps)</option>
+                <option value="false">Disabled (Standard SDR Pass-through)</option>
+              </select>
             </div>
 
             {/* Video Quality */}

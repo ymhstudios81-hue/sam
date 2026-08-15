@@ -46,6 +46,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
   );
   const [showOverlays, setShowOverlays] = useState<boolean>(clip?.showOverlays ?? false);
   const [showProgressBar, setShowProgressBar] = useState<boolean>(clip?.showProgressBar ?? false);
+  const [enable4kFilter, setEnable4kFilter] = useState<boolean>(clip?.enable4kFilter ?? true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,6 +64,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
     setCaptionStyle(clip.captionStyle || 'viral_yellow');
     setShowOverlays(clip.showOverlays ?? false);
     setShowProgressBar(clip.showProgressBar ?? false);
+    setEnable4kFilter(clip.enable4kFilter ?? true);
     setCurrentTime(safeStart);
     setIsPlaying(false);
     setErrorMsg(null);
@@ -141,6 +143,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
       captionStyle,
       showOverlays,
       showProgressBar,
+      enable4kFilter,
     };
     onSaveClip(updated);
     onClose();
@@ -161,6 +164,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
       captionStyle,
       showOverlays,
       showProgressBar,
+      enable4kFilter,
     };
     onSaveClip(updated);
     onRenderClip(updated);
@@ -185,7 +189,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
               <h2 className="text-base font-bold text-white truncate max-w-md">{clip.title}</h2>
             </div>
             <p className="text-xs text-neutral-400 mt-0.5">
-              Select format ratio (9:16, 16:9, 1:1), adjust boundaries, captions, and overlays
+              Select format ratio (9:16, 16:9, 1:1), adjust boundaries, 4K filter, captions, and overlays
             </p>
           </div>
           <button
@@ -213,6 +217,8 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
               onTimeUpdate={(t) => setCurrentTime(isNaN(t) ? 0 : t)}
               onTogglePlay={togglePlay}
               showFramingOverlay={true}
+              enable4kFilter={enable4kFilter}
+              onToggle4kFilter={setEnable4kFilter}
               className="w-full max-h-[360px]"
             />
 
@@ -361,6 +367,47 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
                 ? 'Subtitles will be rendered directly onto the video frames.'
                 : 'Clean video will be exported without any text baked into the pixels. You can still download the standalone .SRT subtitle file.'}
             </p>
+          </div>
+
+          {/* CapCut 4K Quality & Color Grading Enhancement Filter */}
+          <div className="space-y-3 bg-neutral-950/70 p-4 rounded-xl border border-neutral-800">
+            <div className="flex items-center justify-between text-xs font-medium text-neutral-300">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span className="font-bold text-white">CapCut 4K HD Quality Filter (CC & Sharpen)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEnable4kFilter(!enable4kFilter)}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold font-mono transition flex items-center gap-1.5 shadow-sm ${
+                  enable4kFilter
+                    ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-neutral-950 border border-amber-300 ring-2 ring-amber-500/30'
+                    : 'bg-neutral-800 text-neutral-400 border border-neutral-700 hover:text-white'
+                }`}
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${enable4kFilter ? 'text-neutral-950 fill-neutral-950' : 'text-neutral-500'}`} />
+                <span>{enable4kFilter ? '✨ 4K CC Filter: ON' : '4K Filter: OFF'}</span>
+              </button>
+            </div>
+
+            <p className="text-xs text-neutral-400 leading-relaxed">
+              Applies CapCut-style unsharp clarity edge sharpening, S-curve dynamic contrast boost, rich skin-tone color grading, and renders at a crystal-clear 24 Mbps bitrate.
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+              <div className={`p-2 rounded-lg border text-center text-[10px] font-mono ${enable4kFilter ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+                🎯 Edge Sharpening
+              </div>
+              <div className={`p-2 rounded-lg border text-center text-[10px] font-mono ${enable4kFilter ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+                🌈 Dynamic Saturation
+              </div>
+              <div className={`p-2 rounded-lg border text-center text-[10px] font-mono ${enable4kFilter ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+                ✨ Studio Highlights
+              </div>
+              <div className={`p-2 rounded-lg border text-center text-[10px] font-mono ${enable4kFilter ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+                ⚡ 24 Mbps Bitrate
+              </div>
+            </div>
           </div>
 
           {/* Overlays & Watermark Settings (Clean Output by Default) */}

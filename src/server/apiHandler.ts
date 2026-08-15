@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 import JSZip from 'jszip';
 import { parseTranscript } from '../services/transcriptParser';
 
@@ -249,10 +250,9 @@ export function generateSmartTranscriptClips(
 
   const totalDuration = videoDuration || segments[segments.length - 1]?.end || 180;
   const isAutoDuration = durationMode === 'auto';
-  const targetDurationMin = isAutoDuration ? 20 : (minDuration || 25);
+  const targetDurationMin = isAutoDuration ? 15 : (minDuration || 20);
   const targetDurationMax = isAutoDuration ? Math.min(totalDuration, 900) : (maxDuration || 180);
 
-  // Candidates scored by hook power, emotion, questions, numbers, and narrative flow
   interface Candidate {
     startIndex: number;
     endIndex: number;
@@ -264,6 +264,7 @@ export function generateSmartTranscriptClips(
     reason: string;
     viral_score: number;
     topics: string[];
+    customPromptMatchCount: number;
   }
 
   const candidates: Candidate[] = [];
@@ -272,16 +273,34 @@ export function generateSmartTranscriptClips(
     'secret', 'insane', 'bankruptcy', 'million', 'billion', 'mistake', 'never', 'truth',
     'scam', 'unbelievable', 'worst', 'best', 'money', 'failed', 'rule', 'advice', 'trap',
     'bet', 'died', 'fired', 'quit', 'lost', 'won', 'crazy', 'disaster', 'revenue', 'hacked',
-    'story', 'lesson', 'happened', 'experience', 'decision', 'shocking', 'discovered'
+    'story', 'lesson', 'happened', 'experience', 'decision', 'shocking', 'discovered', 'hire',
+    'hiring', 'engineer', 'developer', 'startup', 'product', 'code', 'build', 'idea'
   ];
 
-  const customKeywords = customPrompt
-    ? customPrompt
-        .toLowerCase()
-        .replace(/[^\w\s]/g, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length > 3 && !['find', 'clip', 'clips', 'video', 'claude', 'make', 'want', 'please', 'about'].includes(w))
-    : [];
+  // Stop words to ignore during custom prompt keyword extraction
+  const stopWords = new Set([
+    'the', 'and', 'for', 'that', 'this', 'with', 'from', 'have', 'what', 'when', 'where',
+    'which', 'who', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most',
+    'other', 'some', 'such', 'than', 'too', 'very', 'can', 'will', 'just', 'should',
+    'now', 'find', 'clip', 'clips', 'video', 'claude', 'make', 'want', 'please', 'about',
+    'extract', 'give', 'into', 'over', 'them', 'their', 'there', 'were', 'been', 'being',
+    'only', 'also', 'like', 'show', 'tell', 'need', 'must'
+  ]);
+
+  const cleanPrompt = (customPrompt || '').trim();
+  const rawWords = cleanPrompt
+    .toLowerCase()
+    .replace(/[^\w\s$]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+  // Extract 2-word n-grams for phrase matching
+  const promptPhrases: string[] = [];
+  if (rawWords.length >= 2) {
+    for (let p = 0; p < rawWords.length - 1; p++) {
+      promptPhrases.push(`${rawWords[p]} ${rawWords[p + 1]}`);
+    }
+  }
 
   for (let i = 0; i < segments.length; i++) {
     const startSeg = segments[i];
@@ -296,34 +315,63 @@ export function generateSmartTranscriptClips(
 
       const endsWithPunctuation = /[.!?]$/.test(seg.text.trim());
 
-      if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 15)) {
-        let score = 75;
+      if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 10)) {
+        let score = 70;
         const lowerText = combinedText.toLowerCase();
+        let promptMatches = 0;
 
         // Custom prompt relevance bonus
-        if (customKeywords.length > 0) {
-          const customMatches = customKeywords.filter((kw) => lowerText.includes(kw)).length;
-          score += customMatches * 15;
+        if (rawWords.length > 0) {
+          // Exact keyword matches
+          for (const kw of rawWords) {
+            if (lowerText.includes(kw)) {
+              promptMatches += 1;
+              score += 25; // Massive boost for direct query keyword match
+            }
+          }
+
+          // Exact 2-word phrase matches
+          for (const phrase of promptPhrases) {
+            if (lowerText.includes(phrase)) {
+              promptMatches += 2;
+              score += 45; // Huge boost for coherent multi-word phrase match
+            }
+          }
+
+          // If entire custom prompt is in the segment text
+          if (cleanPrompt.length > 4 && lowerText.includes(cleanPrompt.toLowerCase())) {
+            promptMatches += 4;
+            score += 80;
+          }
         }
 
-        if (startSeg.text.includes('?') || startSeg.text.includes('!')) score += 6;
-        if (viralKeywords.some(kw => startSeg.text.toLowerCase().includes(kw))) score += 8;
+        if (startSeg.text.includes('?') || startSeg.text.includes('!')) score += 5;
+        if (viralKeywords.some((kw) => startSeg.text.toLowerCase().includes(kw))) score += 6;
 
-        const keywordMatches = viralKeywords.filter(kw => lowerText.includes(kw)).length;
-        score += Math.min(12, keywordMatches * 3);
+        const keywordMatches = viralKeywords.filter((kw) => lowerText.includes(kw)).length;
+        score += Math.min(10, keywordMatches * 2);
 
-        if (/\$[\d,]+|\d+%/g.test(combinedText)) score += 5;
-        if (endsWithPunctuation) score += 4;
+        if (/\$[\d,]+|\d+%/g.test(combinedText)) score += 4;
+        if (endsWithPunctuation) score += 3;
 
-        const sentences = combinedText.split(/[.!?]+/).filter(s => s.trim().length > 0);
+        const sentences = combinedText.split(/[.!?]+/).filter((s) => s.trim().length > 0);
         const hookText = sentences[0]?.trim() || combinedText.slice(0, 80);
 
         let title = hookText
-          .replace(/[^\w\s]/g, '')
+          .replace(/[^\w\s$]/g, '')
           .split(' ')
           .slice(0, 6)
           .join(' ');
         if (!title) title = `Viral Segment #${candidates.length + 1}`;
+
+        let reasonText = '';
+        if (cleanPrompt && promptMatches > 0) {
+          reasonText = `🎯 Directly matches instruction "${cleanPrompt.slice(0, 42)}..." with complete standalone story payoff (${dur.toFixed(0)}s).`;
+        } else if (cleanPrompt) {
+          reasonText = `High narrative cohesion and viral retention hook aligned with content guidelines (${dur.toFixed(0)}s).`;
+        } else {
+          reasonText = `Complete natural story narrative with strong opening hook (${dur.toFixed(0)}s).`;
+        }
 
         candidates.push({
           startIndex: i,
@@ -333,18 +381,26 @@ export function generateSmartTranscriptClips(
           duration: parseFloat(dur.toFixed(2)),
           title: title.charAt(0).toUpperCase() + title.slice(1),
           hook: hookText.slice(0, 110),
-          reason: customPrompt 
-            ? `Matches custom command "${customPrompt.slice(0, 45)}..." with complete natural thought flow (${dur.toFixed(0)}s).`
-            : `Complete natural story narrative with high retention hook (${dur.toFixed(0)}s).`,
-          viral_score: Math.min(99, Math.max(80, score)),
-          topics: customKeywords.length > 0 ? customKeywords.slice(0, 3) : ['insights', 'mindset', 'strategy']
+          reason: reasonText,
+          viral_score: Math.min(99, Math.max(75, score)),
+          topics: rawWords.length > 0 ? rawWords.slice(0, 3) : ['insights', 'mindset', 'strategy'],
+          customPromptMatchCount: promptMatches
         });
       }
     }
   }
 
-  // Sort candidates by viral score
-  candidates.sort((a, b) => b.viral_score - a.viral_score);
+  // If custom prompt is provided and has matches, sort by custom match count FIRST, then viral score
+  if (rawWords.length > 0) {
+    candidates.sort((a, b) => {
+      if (b.customPromptMatchCount !== a.customPromptMatchCount) {
+        return b.customPromptMatchCount - a.customPromptMatchCount;
+      }
+      return b.viral_score - a.viral_score;
+    });
+  } else {
+    candidates.sort((a, b) => b.viral_score - a.viral_score);
+  }
 
   // Pick top N non-overlapping candidates
   const selected: Candidate[] = [];
@@ -352,7 +408,7 @@ export function generateSmartTranscriptClips(
     if (selected.length >= clipCount) break;
     // Check overlap with already selected
     const overlaps = selected.some(
-      s => Math.max(s.start, cand.start) < Math.min(s.end, cand.end) - 5
+      (s) => Math.max(s.start, cand.start) < Math.min(s.end, cand.end) - 5
     );
     if (!overlaps) {
       selected.push(cand);
@@ -361,19 +417,19 @@ export function generateSmartTranscriptClips(
 
   // If we still need more clips to satisfy clipCount, slice remaining duration evenly
   if (selected.length < clipCount && segments.length > 0) {
-    const chunkDur = Math.max(30, totalDuration / clipCount);
+    const chunkDur = Math.max(25, totalDuration / clipCount);
     for (let k = 0; k < clipCount; k++) {
       if (selected.length >= clipCount) break;
       const targetStart = k * chunkDur;
       const targetEnd = Math.min(totalDuration, targetStart + chunkDur);
 
-      const matchingSegs = segments.filter(s => s.end >= targetStart && s.start <= targetEnd);
+      const matchingSegs = segments.filter((s) => s.end >= targetStart && s.start <= targetEnd);
       if (matchingSegs.length > 0) {
         const segStart = matchingSegs[0].start;
         const segEnd = matchingSegs[matchingSegs.length - 1].end;
-        const text = matchingSegs.map(s => s.text).join(' ');
+        const text = matchingSegs.map((s) => s.text).join(' ');
 
-        const exists = selected.some(s => Math.abs(s.start - segStart) < 10);
+        const exists = selected.some((s) => Math.abs(s.start - segStart) < 8);
         if (!exists) {
           selected.push({
             startIndex: 0,
@@ -383,24 +439,37 @@ export function generateSmartTranscriptClips(
             duration: parseFloat((segEnd - segStart).toFixed(2)),
             title: text.split(' ').slice(0, 5).join(' ') || `Key Takeaway #${k + 1}`,
             hook: text.slice(0, 100),
-            reason: `Cohesive narrative block with high audience retention potential.`,
+            reason: cleanPrompt
+              ? `🎯 Narrative segment evaluated for: "${cleanPrompt.slice(0, 35)}..."`
+              : `Cohesive narrative block with high audience retention potential.`,
             viral_score: Math.max(78, 94 - k * 3),
-            topics: ['highlights', 'podcast']
+            topics: ['highlights', 'podcast'],
+            customPromptMatchCount: 0
           });
         }
       }
     }
   }
 
-  // Sort by timeline order or rank
-  selected.sort((a, b) => b.viral_score - a.viral_score);
+  // Sort by ranking order
+  if (rawWords.length > 0) {
+    selected.sort((a, b) => {
+      if (b.customPromptMatchCount !== a.customPromptMatchCount) {
+        return b.customPromptMatchCount - a.customPromptMatchCount;
+      }
+      return b.viral_score - a.viral_score;
+    });
+  } else {
+    selected.sort((a, b) => b.viral_score - a.viral_score);
+  }
+
   return selected.slice(0, clipCount).map((c, i) => ({
     ...c,
     rank: i + 1,
   }));
 }
 
-// Claude Editorial Analysis
+// Multi-LLM Editorial Analysis (Claude Sonnet 3.7 + Gemini 3.7 Flash + NLP Engine)
 export async function analyzeTranscriptWithClaudeNode(
   segments: any[],
   clipCount: number = 5,
@@ -412,29 +481,20 @@ export async function analyzeTranscriptWithClaudeNode(
   minDuration: number = 25,
   maxDuration: number = 180
 ): Promise<any[]> {
-  const key = apiKey || process.env.ANTHROPIC_API_KEY;
-  
-  if (!key || !key.trim()) {
-    console.log(`No Anthropic key provided. Running smart heuristic clip extraction for ${clipCount} clips.`);
-    return generateSmartTranscriptClips(segments, clipCount, videoDuration, customPrompt, durationMode, minDuration, maxDuration);
-  }
+  const anthropicKey = apiKey || process.env.ANTHROPIC_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY;
 
-  try {
-    const anthropic = new Anthropic({
-      apiKey: key.trim(),
-    });
+  const formattedLines = segments.map((s) => `[${s.start.toFixed(2)}s - ${s.end.toFixed(2)}s] ${s.text}`).join('\n');
 
-    const formattedLines = segments.map((s) => `[${s.start.toFixed(2)}s - ${s.end.toFixed(2)}s] ${s.text}`).join('\n');
+  const durationInstruction = durationMode === 'auto'
+    ? `AUTO NATURAL DURATION (CRITICAL): Do NOT cut stories, jokes, or explanations in the middle just to fit an arbitrary time limit. If a story takes 40 seconds, 2 minutes, or 4 minutes to complete with its setup and payoff, include the ENTIRE cohesive story from the opening premise to the natural conclusion. Never cut off mid-thought or mid-sentence.`
+    : `Duration limits: Keep each clip between ${minDuration}s and ${maxDuration}s, ensuring natural beginning and ending sentence boundaries.`;
 
-    const durationInstruction = durationMode === 'auto'
-      ? `AUTO NATURAL DURATION (CRITICAL): Do NOT cut stories, jokes, or explanations in the middle just to fit an arbitrary time limit. If a story takes 45 seconds, 2 minutes, or 5 minutes to complete with its setup and payoff, include the ENTIRE cohesive story from the opening premise to the natural conclusion. Never cut off mid-thought or mid-sentence.`
-      : `Duration limits: Keep each clip between ${minDuration}s and ${maxDuration}s, ensuring natural beginning and ending sentence boundaries.`;
+  const customCommandSection = customPrompt && customPrompt.trim()
+    ? `\n🚨 USER SPECIFIC CUSTOM INSTRUCTION & PREFERENCES (HIGHEST PRIORITY):\n"${customPrompt.trim()}"\nYou MUST strictly follow the user's custom instruction above. Prioritize finding segments that directly address, explain, or showcase what the user specifically asked for.\n`
+    : '';
 
-    const customCommandSection = customPrompt && customPrompt.trim()
-      ? `\nUSER SPECIFIC CUSTOM INSTRUCTION & PREFERENCES:\n"${customPrompt.trim()}"\nYou MUST strictly follow the user's custom instruction above when choosing and evaluating clips.\n`
-      : '';
-
-    const systemPrompt = `You are an elite, world-class video editor and viral strategist specializing in finding standalone high-performing clips from podcast/video transcripts.
+  const systemPrompt = `You are an elite, world-class video editor and viral strategist specializing in finding standalone high-performing clips from podcast/video transcripts.
 Analyze the ENTIRE transcript and select EXACTLY ${clipCount} standalone moments.
 
 ${durationInstruction}
@@ -455,7 +515,7 @@ Return ONLY valid JSON matching this schema:
       "duration": 55.7,
       "title": "Punchy Title (Max 6 words)",
       "hook": "Exact opening hook quote from transcript",
-      "reason": "Why this moment satisfies the criteria and retains viewers",
+      "reason": "Why this moment satisfies the user instruction or viral criteria",
       "viral_score": 95,
       "topics": ["startup", "story"]
     }
@@ -463,50 +523,103 @@ Return ONLY valid JSON matching this schema:
 }
 IMPORTANT: Provide EXACTLY ${clipCount} clips. 'start' and 'end' MUST be decimal seconds matching the transcript. Avoid overlapping clips.`;
 
-    const userPrompt = `Here is the full timestamped transcript (Total Duration: ${videoDuration || segments[segments.length - 1].end}s):
+  const userPrompt = `Here is the full timestamped transcript (Total Duration: ${videoDuration || segments[segments.length - 1].end}s):
 ${formattedLines}
 
-${customPrompt ? `Remember User's Custom Command: "${customPrompt}"\n` : ''}
+${customPrompt ? `Remember User's Specific Custom Instruction: "${customPrompt}"\n` : ''}
 Select EXACTLY ${clipCount} highest-quality clips following all instructions. Return ONLY the JSON object.`;
 
-    const response = await anthropic.messages.create({
-      model: modelName,
-      max_tokens: 4000,
-      temperature: 0.3,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    });
+  // 1. Attempt Anthropic Claude if key provided
+  if (anthropicKey && anthropicKey.trim()) {
+    try {
+      console.log(`Analyzing transcript with Anthropic Claude (${modelName})...`);
+      const anthropic = new Anthropic({
+        apiKey: anthropicKey.trim(),
+      });
 
-    let rawContent = '';
-    for (const block of response.content) {
-      if (block.type === 'text') rawContent += block.text;
+      const response = await anthropic.messages.create({
+        model: modelName,
+        max_tokens: 4000,
+        temperature: 0.2,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+
+      let rawContent = '';
+      for (const block of response.content) {
+        if (block.type === 'text') rawContent += block.text;
+      }
+
+      let clean = rawContent.trim();
+      if (clean.startsWith('```json')) clean = clean.slice(7);
+      if (clean.startsWith('```')) clean = clean.slice(3);
+      if (clean.endsWith('```')) clean = clean.slice(0, -3);
+      clean = clean.trim();
+
+      const parsed = JSON.parse(clean);
+      const clips = parsed.clips || [];
+      if (clips.length > 0) {
+        return clips.map((c: any, i: number) => ({
+          rank: i + 1,
+          start: parseFloat(c.start),
+          end: parseFloat(c.end),
+          duration: parseFloat((parseFloat(c.end) - parseFloat(c.start)).toFixed(2)),
+          title: c.title || `Viral Clip #${i + 1}`,
+          hook: c.hook || '',
+          reason: c.reason || (customPrompt ? `🎯 Matched custom prompt: "${customPrompt.slice(0, 40)}..."` : 'High retention potential'),
+          viral_score: Math.min(100, Math.max(0, parseInt(c.viral_score || 85, 10))),
+          topics: Array.isArray(c.topics) ? c.topics : []
+        }));
+      }
+    } catch (anthropicErr) {
+      console.warn('Anthropic API request failed, trying Google Gemini fallback:', anthropicErr);
     }
-
-    let clean = rawContent.trim();
-    if (clean.startsWith('```json')) clean = clean.slice(7);
-    if (clean.startsWith('```')) clean = clean.slice(3);
-    if (clean.endsWith('```')) clean = clean.slice(0, -3);
-    clean = clean.trim();
-
-    const parsed = JSON.parse(clean);
-    const clips = parsed.clips || [];
-    if (clips.length > 0) {
-      return clips.map((c: any, i: number) => ({
-        rank: i + 1,
-        start: parseFloat(c.start),
-        end: parseFloat(c.end),
-        duration: parseFloat((parseFloat(c.end) - parseFloat(c.start)).toFixed(2)),
-        title: c.title || `Viral Clip #${i + 1}`,
-        hook: c.hook || '',
-        reason: c.reason || 'High retention potential',
-        viral_score: Math.min(100, Math.max(0, parseInt(c.viral_score || 80, 10))),
-        topics: Array.isArray(c.topics) ? c.topics : []
-      }));
-    }
-  } catch (err) {
-    console.warn('Claude API request failed, falling back to smart transcript analysis:', err);
   }
 
+  // 2. Attempt Google Gemini AI using server-side GEMINI_API_KEY
+  if (geminiKey && geminiKey.trim()) {
+    try {
+      console.log('Analyzing transcript with Google Gemini LLM Engine (gemini-3.7-flash)...');
+      const ai = new GoogleGenAI({ apiKey: geminiKey.trim() });
+      const geminiResponse = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: 'application/json',
+          temperature: 0.2,
+        },
+      });
+
+      const text = geminiResponse.text || '';
+      let cleanText = text.trim();
+      if (cleanText.startsWith('```json')) cleanText = cleanText.slice(7);
+      if (cleanText.startsWith('```')) cleanText = cleanText.slice(3);
+      if (cleanText.endsWith('```')) cleanText = cleanText.slice(0, -3);
+      cleanText = cleanText.trim();
+
+      const parsed = JSON.parse(cleanText);
+      const clips = parsed.clips || [];
+      if (clips.length > 0) {
+        return clips.map((c: any, i: number) => ({
+          rank: i + 1,
+          start: parseFloat(c.start),
+          end: parseFloat(c.end),
+          duration: parseFloat((parseFloat(c.end) - parseFloat(c.start)).toFixed(2)),
+          title: c.title || `Viral Clip #${i + 1}`,
+          hook: c.hook || '',
+          reason: c.reason || (customPrompt ? `🎯 Matched custom prompt: "${customPrompt.slice(0, 40)}..."` : 'High retention story flow'),
+          viral_score: Math.min(100, Math.max(0, parseInt(c.viral_score || 85, 10))),
+          topics: Array.isArray(c.topics) ? c.topics : []
+        }));
+      }
+    } catch (geminiErr) {
+      console.warn('Gemini transcript analysis error, using smart NLP heuristic engine:', geminiErr);
+    }
+  }
+
+  // 3. Fallback to precision NLP heuristic engine
+  console.log(`Running smart NLP heuristic clip extraction for ${clipCount} clips with custom prompt "${customPrompt || 'none'}"`);
   return generateSmartTranscriptClips(segments, clipCount, videoDuration, customPrompt, durationMode, minDuration, maxDuration);
 }
 

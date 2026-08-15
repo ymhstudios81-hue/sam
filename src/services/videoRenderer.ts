@@ -11,6 +11,7 @@ export interface VideoRenderOptions {
   showOverlays?: boolean;
   showProgressBar?: boolean;
   showWatermark?: boolean;
+  enable4kFilter?: boolean; // CapCut 4K HD Quality & Color Grade filter
   fps?: number;
 }
 
@@ -26,7 +27,8 @@ function drawProceduralPodcastFrame(
   cropMode: CropMode = 'center',
   aspect: string = '9:16',
   panFactor: number = 0.5,
-  smoothedPanX: number = 0.5
+  smoothedPanX: number = 0.5,
+  enable4kFilter: boolean = false
 ) {
   // Create virtual 16:9 1920x1080 canvas frame
   const vWidth = 1920;
@@ -41,11 +43,17 @@ function drawProceduralPodcastFrame(
 
   const frameTick = curTime * 30;
 
-  // 1. Dark Studio Gradient Background
+  // 1. Dark Studio Gradient Background (enhanced dynamic range when 4K CC active)
   const grad = vCtx.createLinearGradient(0, 0, vWidth, vHeight);
-  grad.addColorStop(0, '#090d16');
-  grad.addColorStop(0.5, '#0f172a');
-  grad.addColorStop(1, '#1e1b4b');
+  if (enable4kFilter) {
+    grad.addColorStop(0, '#060912');
+    grad.addColorStop(0.5, '#0d1322');
+    grad.addColorStop(1, '#1a1840');
+  } else {
+    grad.addColorStop(0, '#090d16');
+    grad.addColorStop(0.5, '#0f172a');
+    grad.addColorStop(1, '#1e1b4b');
+  }
   vCtx.fillStyle = grad;
   vCtx.fillRect(0, 0, vWidth, vHeight);
 
@@ -455,9 +463,11 @@ export async function renderClipToBlob(
         mimeType = 'video/webm';
       }
 
+      const is4kFilterEnabled = options?.enable4kFilter ?? clip.enable4kFilter ?? false;
+
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : undefined,
-        videoBitsPerSecond: 12_000_000, // 12 Mbps crisp 1080p
+        videoBitsPerSecond: is4kFilterEnabled ? 24_000_000 : 12_000_000, // 24 Mbps for Ultra 4K CC, 12 Mbps standard
         audioBitsPerSecond: 192_000,
       });
 
@@ -524,7 +534,13 @@ export async function renderClipToBlob(
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
 
-        // 2. Draw Video Frame (Real Video or Procedural High-Fidelity Studio)
+        // 2. Draw Video Frame with optional CapCut 4K Quality / Color Grade filter
+        if (is4kFilterEnabled) {
+          ctx.filter = 'contrast(1.18) saturate(1.24) brightness(1.03)';
+        } else {
+          ctx.filter = 'none';
+        }
+
         const canUseRealVideo =
           !isSyntheticVideo &&
           videoEl &&
@@ -627,9 +643,13 @@ export async function renderClipToBlob(
             cropMode,
             aspect,
             panFactor,
-            tracking.smoothedPanX
+            tracking.smoothedPanX,
+            is4kFilterEnabled
           );
         }
+
+        // Reset filter for crisp subtitle and overlay rendering
+        ctx.filter = 'none';
 
         // 3. Optional Viral Rank & Hook Overlays
         if (showOverlays) {

@@ -17,6 +17,8 @@ interface VideoPlayerWithFramingProps {
   onTimeUpdate: (time: number) => void;
   onTogglePlay: () => void;
   showFramingOverlay?: boolean;
+  enable4kFilter?: boolean;
+  onToggle4kFilter?: (enabled: boolean) => void;
   className?: string;
   autoLoopClip?: boolean;
 }
@@ -34,9 +36,27 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
   onTimeUpdate,
   onTogglePlay,
   showFramingOverlay = true,
+  enable4kFilter,
+  onToggle4kFilter,
   className = '',
   autoLoopClip = true,
 }) => {
+  const [internal4k, setInternal4k] = useState<boolean>(enable4kFilter ?? false);
+
+  useEffect(() => {
+    if (enable4kFilter !== undefined) {
+      setInternal4k(enable4kFilter);
+    }
+  }, [enable4kFilter]);
+
+  const is4kActive = enable4kFilter !== undefined ? enable4kFilter : internal4k;
+
+  const handleToggle4k = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextVal = !is4kActive;
+    setInternal4k(nextVal);
+    onToggle4kFilter?.(nextVal);
+  };
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [nativeVideoPlayable, setNativeVideoPlayable] = useState<boolean>(false);
@@ -384,6 +404,12 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
             setNativeVideoPlayable(false);
             setHasVideoError(true);
           }}
+          style={{
+            filter: is4kActive
+              ? 'contrast(1.18) saturate(1.24) brightness(1.03) drop-shadow(0 0 1px rgba(0,0,0,0.5))'
+              : 'none',
+            transition: 'filter 0.25s ease',
+          }}
           className={`w-full h-full object-contain ${
             nativeVideoPlayable ? 'block' : 'hidden'
           }`}
@@ -395,10 +421,33 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
         ref={canvasRef}
         width={960}
         height={540}
+        style={{
+          filter: is4kActive
+            ? 'contrast(1.18) saturate(1.24) brightness(1.03) drop-shadow(0 0 1px rgba(0,0,0,0.5))'
+            : 'none',
+          transition: 'filter 0.25s ease',
+        }}
         className={`w-full h-full object-contain ${
           !nativeVideoPlayable || hasVideoError ? 'block' : 'hidden'
         }`}
       />
+
+      {/* CapCut 4K Quality Quick Toggle Button in top-right corner of player */}
+      <div className="absolute top-2.5 right-2.5 z-20 pointer-events-auto">
+        <button
+          type="button"
+          onClick={handleToggle4k}
+          className={`px-2.5 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1.5 transition shadow-lg backdrop-blur-md border ${
+            is4kActive
+              ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-neutral-950 border-amber-300 ring-2 ring-amber-500/30'
+              : 'bg-neutral-950/80 text-neutral-400 border-neutral-700 hover:text-white hover:border-neutral-500'
+          }`}
+          title={is4kActive ? 'CapCut 4K Quality Filter: ACTIVE (Click to toggle)' : 'CapCut 4K Quality Filter: OFF (Click to activate)'}
+        >
+          <Sparkles className={`w-3.5 h-3.5 ${is4kActive ? 'text-neutral-950 fill-neutral-950' : 'text-amber-400'}`} />
+          <span>{is4kActive ? '✨ 4K CC: ON' : '4K CC: OFF'}</span>
+        </button>
+      </div>
 
       {/* 3. Aspect Ratio Framing Overlays */}
       {showFramingOverlay && (

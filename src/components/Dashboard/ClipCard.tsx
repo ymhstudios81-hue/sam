@@ -11,6 +11,7 @@ interface ClipCardProps {
   onCropModeChange: (clipId: string, mode: CropMode) => void;
   onAspectRatioChange?: (clipId: string, format: AspectRatioFormat) => void;
   onToggleCaptions?: (clipId: string) => void;
+  onToggle4kFilter?: (clipId: string) => void;
   isRendering?: boolean;
 }
 
@@ -22,11 +23,13 @@ export const ClipCard: React.FC<ClipCardProps> = ({
   onCropModeChange,
   onAspectRatioChange,
   onToggleCaptions,
+  onToggle4kFilter,
   isRendering,
 }) => {
   const currentFormat: AspectRatioFormat = clip.aspectRatio || '9:16';
   const isRendered = clip.status === 'completed' || Boolean(clip.renderedVideoUrl);
   const captionsEnabled = clip.includeCaptions !== false;
+  const is4kEnabled = clip.enable4kFilter === true;
 
   const getViralScoreColor = (score: number) => {
     if (score >= 90) return 'text-emerald-400 border-emerald-500/30 bg-emerald-950/40';
@@ -155,6 +158,21 @@ export const ClipCard: React.FC<ClipCardProps> = ({
             >
               <MessageSquareText className="w-3 h-3" />
               <span>{captionsEnabled ? 'Captions: ON' : 'Captions: OFF'}</span>
+            </button>
+
+            {/* CapCut 4K Quality Toggle Button */}
+            <button
+              type="button"
+              onClick={() => onToggle4kFilter && onToggle4kFilter(clip.id)}
+              className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded border flex items-center gap-1 transition ${
+                is4kEnabled
+                  ? 'bg-gradient-to-r from-amber-500/20 to-yellow-500/20 text-amber-300 border-amber-400/50 shadow-sm'
+                  : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:text-neutral-200'
+              }`}
+              title={is4kEnabled ? 'CapCut 4K Quality & Color Grade filter: ON (Click to disable)' : 'CapCut 4K Quality & Color Grade filter: OFF (Click to enable)'}
+            >
+              <Sparkles className={`w-3 h-3 ${is4kEnabled ? 'text-amber-400' : 'text-neutral-500'}`} />
+              <span>{is4kEnabled ? '4K CC: ON' : '4K CC: OFF'}</span>
             </button>
           </div>
 
