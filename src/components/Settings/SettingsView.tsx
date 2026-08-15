@@ -27,6 +27,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   );
   const [defaultAspectRatio, setDefaultAspectRatio] = useState<AspectRatioFormat>(settings.aspectRatio || '9:16');
   const [defaultCropMode, setDefaultCropMode] = useState<CropMode>(settings.cropMode);
+  const [defaultIncludeCaptions, setDefaultIncludeCaptions] = useState<boolean>(settings.defaultIncludeCaptions ?? true);
+  const [defaultCaptionStyle, setDefaultCaptionStyle] = useState<'viral_yellow' | 'clean_white' | 'minimal' | 'none'>(settings.defaultCaptionStyle || 'viral_yellow');
+  const [defaultShowOverlays, setDefaultShowOverlays] = useState<boolean>(settings.defaultShowOverlays ?? false);
   const [videoQuality, setVideoQuality] = useState(settings.videoQuality);
   const [workspaceDir, setWorkspaceDir] = useState(settings.workspaceDir);
   const [isSaved, setIsSaved] = useState(false);
@@ -48,6 +51,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       maxClipDuration: parsedMax,
       aspectRatio: defaultAspectRatio,
       cropMode: defaultCropMode,
+      defaultIncludeCaptions,
+      defaultCaptionStyle,
+      defaultShowOverlays,
       videoQuality,
       workspaceDir,
       anthropicApiKeyConfigured: Boolean(apiKeyInput.trim() || settings.anthropicApiKeyConfigured),
@@ -208,6 +214,52 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <option value="center">Center Crop (Direct Center Cut)</option>
                 <option value="blur">Fit with Blurred Background</option>
                 <option value="custom">Custom Horizontal Pan</option>
+              </select>
+            </div>
+
+            {/* Subtitles Burning Default */}
+            <div>
+              <label className="text-xs font-semibold text-neutral-300 block mb-1">
+                Default Subtitles (Captions)
+              </label>
+              <select
+                value={defaultIncludeCaptions ? 'true' : 'false'}
+                onChange={(e) => setDefaultIncludeCaptions(e.target.value === 'true')}
+                className="w-full px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-700 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
+              >
+                <option value="true">Burn Subtitles into Video (Enabled)</option>
+                <option value="false">Clean Video (No Subtitles on Pixels)</option>
+              </select>
+            </div>
+
+            {/* Subtitles Style Default */}
+            <div>
+              <label className="text-xs font-semibold text-neutral-300 block mb-1">
+                Default Subtitle Style
+              </label>
+              <select
+                value={defaultCaptionStyle}
+                onChange={(e) => setDefaultCaptionStyle(e.target.value as any)}
+                className="w-full px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-700 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
+              >
+                <option value="viral_yellow">Viral Yellow Highlight (High Retention)</option>
+                <option value="clean_white">Clean White Text with Dark Stroke</option>
+                <option value="minimal">Minimalist Translucent Subtitle Plate</option>
+              </select>
+            </div>
+
+            {/* Video Overlays (Clean by default) */}
+            <div>
+              <label className="text-xs font-semibold text-neutral-300 block mb-1">
+                Export Overlays & Badges
+              </label>
+              <select
+                value={defaultShowOverlays ? 'true' : 'false'}
+                onChange={(e) => setDefaultShowOverlays(e.target.value === 'true')}
+                className="w-full px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-700 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
+              >
+                <option value="false">Clean Export (No Rank or Score Badges)</option>
+                <option value="true">Burn Rank (#1) & Viral Score Badges</option>
               </select>
             </div>
 

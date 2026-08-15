@@ -470,6 +470,19 @@ export default function App() {
     }));
   };
 
+  const handleToggleCaptions = (clipId: string) => {
+    updateActiveProject((prev) => ({
+      ...prev,
+      clips: prev.clips.map((c) => {
+        if (c.id === clipId) {
+          const current = c.includeCaptions !== false;
+          return { ...c, includeCaptions: !current };
+        }
+        return c;
+      }),
+    }));
+  };
+
   const handleSaveClipFineTune = (updatedClip: Clip) => {
     updateActiveProject((prev) => ({
       ...prev,
@@ -780,6 +793,7 @@ export default function App() {
                 onGenerateBatch={handleGenerateBatch}
                 onCropModeChange={handleCropModeChange}
                 onAspectRatioChange={handleAspectRatioChange}
+                onToggleCaptions={handleToggleCaptions}
                 onExportZip={handleExportZip}
                 isRenderingBatch={isRenderingBatch}
               />

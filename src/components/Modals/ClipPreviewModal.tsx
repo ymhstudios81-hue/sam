@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, Pause, Clock, Sliders, Scissors, AlertCircle, Check, Smartphone, Monitor, Square } from 'lucide-react';
+import { X, Play, Pause, Clock, Sliders, Scissors, AlertCircle, Check, Smartphone, Monitor, Square, MessageSquareText, ShieldAlert, Sparkles, CheckCircle2 } from 'lucide-react';
 import { Clip, CropMode, AspectRatioFormat, VideoMetadata, TranscriptData } from '../../types';
 import { formatSecondsToTimecode } from '../../services/transcriptParser';
 import { VideoPlayerWithFraming } from '../VideoPlayer/VideoPlayerWithFraming';
@@ -40,6 +40,12 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
       ? clip.customPanPercent
       : 50
   );
+  const [includeCaptions, setIncludeCaptions] = useState<boolean>(clip?.includeCaptions ?? true);
+  const [captionStyle, setCaptionStyle] = useState<'viral_yellow' | 'clean_white' | 'minimal' | 'none'>(
+    clip?.captionStyle || 'viral_yellow'
+  );
+  const [showOverlays, setShowOverlays] = useState<boolean>(clip?.showOverlays ?? false);
+  const [showProgressBar, setShowProgressBar] = useState<boolean>(clip?.showProgressBar ?? false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,6 +59,10 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
     setAspectRatio(clip.aspectRatio || '9:16');
     setCropMode(clip.cropMode || 'center');
     setPanPercent(safePan);
+    setIncludeCaptions(clip.includeCaptions ?? true);
+    setCaptionStyle(clip.captionStyle || 'viral_yellow');
+    setShowOverlays(clip.showOverlays ?? false);
+    setShowProgressBar(clip.showProgressBar ?? false);
     setCurrentTime(safeStart);
     setIsPlaying(false);
     setErrorMsg(null);
@@ -127,6 +137,10 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
       aspectRatio,
       cropMode,
       customPanPercent: isNaN(panPercent) ? 50 : panPercent,
+      includeCaptions,
+      captionStyle,
+      showOverlays,
+      showProgressBar,
     };
     onSaveClip(updated);
     onClose();
@@ -143,6 +157,10 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
       aspectRatio,
       cropMode,
       customPanPercent: isNaN(panPercent) ? 50 : panPercent,
+      includeCaptions,
+      captionStyle,
+      showOverlays,
+      showProgressBar,
     };
     onSaveClip(updated);
     onRenderClip(updated);
@@ -167,7 +185,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
               <h2 className="text-base font-bold text-white truncate max-w-md">{clip.title}</h2>
             </div>
             <p className="text-xs text-neutral-400 mt-0.5">
-              Select format ratio (9:16, 16:9, 1:1), adjust boundaries, and preview framing
+              Select format ratio (9:16, 16:9, 1:1), adjust boundaries, captions, and overlays
             </p>
           </div>
           <button
@@ -291,6 +309,107 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
                 </div>
                 <span className="text-[10px] text-neutral-500 mt-1">Instagram, LinkedIn Feed (1080×1080)</span>
               </button>
+            </div>
+          </div>
+
+          {/* Subtitles & Captions Configuration */}
+          <div className="space-y-3 bg-neutral-950/70 p-4 rounded-xl border border-neutral-800">
+            <div className="flex items-center justify-between text-xs font-medium text-neutral-300">
+              <div className="flex items-center gap-1.5">
+                <MessageSquareText className="w-4 h-4 text-amber-400" />
+                <span>Captions & Subtitles</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIncludeCaptions(!includeCaptions)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-bold font-mono transition flex items-center gap-1.5 ${
+                  includeCaptions
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                    : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+                }`}
+              >
+                {includeCaptions ? <CheckCircle2 className="w-3.5 h-3.5" /> : null}
+                <span>{includeCaptions ? 'Burn Subtitles: ON' : 'Burn Subtitles: OFF'}</span>
+              </button>
+            </div>
+
+            {includeCaptions && (
+              <div className="grid grid-cols-3 gap-2.5 pt-1">
+                {[
+                  { id: 'viral_yellow', name: 'Viral Yellow', desc: 'Punchy yellow highlight on dark pill' },
+                  { id: 'clean_white', name: 'Clean White', desc: 'Crisp bold white text with dark outline' },
+                  { id: 'minimal', name: 'Minimal Box', desc: 'Subtle translucent subtitle plate' },
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setCaptionStyle(s.id as any)}
+                    className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between ${
+                      captionStyle === s.id
+                        ? 'bg-amber-500/10 border-amber-500 text-white'
+                        : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-neutral-200">{s.name}</span>
+                    <span className="text-[10px] text-neutral-500 mt-0.5">{s.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-neutral-500">
+              {includeCaptions
+                ? 'Subtitles will be rendered directly onto the video frames.'
+                : 'Clean video will be exported without any text baked into the pixels. You can still download the standalone .SRT subtitle file.'}
+            </p>
+          </div>
+
+          {/* Overlays & Watermark Settings (Clean Output by Default) */}
+          <div className="space-y-3 bg-neutral-950/70 p-4 rounded-xl border border-neutral-800">
+            <div className="flex items-center justify-between text-xs font-medium text-neutral-300">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Export Overlays (Clean Video Control)</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <label
+                className={`p-2.5 rounded-lg border cursor-pointer transition flex items-center justify-between ${
+                  !showOverlays
+                    ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
+                }`}
+              >
+                <div>
+                  <span className="text-xs font-bold block text-neutral-200">Clean Production Export</span>
+                  <span className="text-[10px] text-neutral-400">No clip # or viral score badge</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={!showOverlays}
+                  onChange={(e) => setShowOverlays(!e.target.checked)}
+                  className="accent-emerald-500"
+                />
+              </label>
+
+              <label
+                className={`p-2.5 rounded-lg border cursor-pointer transition flex items-center justify-between ${
+                  showProgressBar
+                    ? 'bg-amber-500/10 border-amber-500 text-amber-300'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
+                }`}
+              >
+                <div>
+                  <span className="text-xs font-bold block text-neutral-200">Bottom Progress Bar</span>
+                  <span className="text-[10px] text-neutral-400">Animated retention time bar</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={showProgressBar}
+                  onChange={(e) => setShowProgressBar(e.target.checked)}
+                  className="accent-amber-500"
+                />
+              </label>
             </div>
           </div>
 
@@ -420,7 +539,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
                       {mode === 'center'
                         ? `Direct ${aspectRatio === '9:16' ? '1080×1920' : '1080×1080'} center cut`
                         : mode === 'blur'
-                        ? 'Fit frame with blurred edges'
+                        ? 'Fit frame with smooth blurred edges'
                         : 'Adjust horizontal focus position'}
                     </span>
                   </button>

@@ -50,6 +50,10 @@ export interface Clip {
   aspectRatio?: AspectRatioFormat; // '9:16' | '16:9' | '1:1'
   cropMode: CropMode;
   customPanPercent?: number; // 0 to 100 for custom crop pan
+  includeCaptions?: boolean; // burn subtitles onto video
+  captionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
+  showOverlays?: boolean; // show rank & viral score overlays
+  showProgressBar?: boolean;
   status: 'idle' | 'queued' | 'rendering' | 'completed' | 'failed';
   renderProgress?: number;
   renderedVideoUrl?: string;
@@ -71,6 +75,9 @@ export interface RenderJob {
   aspectRatio?: AspectRatioFormat;
   cropMode: CropMode;
   customPanPercent?: number;
+  includeCaptions?: boolean;
+  captionStyle?: string;
+  showOverlays?: boolean;
   status: RenderJobStatus;
   progress: number; // 0 to 100
   error?: string;
@@ -103,6 +110,10 @@ export interface AppSettings {
   aspectRatio?: AspectRatioFormat; // '9:16' | '16:9' | '1:1'
   defaultAspectRatio?: AspectRatioFormat; // '9:16' | '16:9' | '1:1'
   cropMode: CropMode;
+  burnCaptions?: boolean;
+  captionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
+  includeDebugOverlays?: boolean;
+  includeProgressBar?: boolean;
   videoQuality: 'medium' | 'high' | 'ultra';
   workspaceDir: string;
   ffmpegDetected: boolean;

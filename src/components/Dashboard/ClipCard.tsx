@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Flame, Clock, Check, Scissors, Sliders, Eye, Sparkles, Smartphone, Monitor, Square, Download, CheckCircle2 } from 'lucide-react';
+import { Play, Flame, Clock, Check, Scissors, Sliders, Eye, Sparkles, Smartphone, Monitor, Square, Download, CheckCircle2, MessageSquareText } from 'lucide-react';
 import { Clip, CropMode, AspectRatioFormat } from '../../types';
 import { formatSecondsToTimecode } from '../../services/transcriptParser';
 
@@ -10,6 +10,7 @@ interface ClipCardProps {
   onGenerateSingle: (clip: Clip) => void;
   onCropModeChange: (clipId: string, mode: CropMode) => void;
   onAspectRatioChange?: (clipId: string, format: AspectRatioFormat) => void;
+  onToggleCaptions?: (clipId: string) => void;
   isRendering?: boolean;
 }
 
@@ -20,10 +21,12 @@ export const ClipCard: React.FC<ClipCardProps> = ({
   onGenerateSingle,
   onCropModeChange,
   onAspectRatioChange,
+  onToggleCaptions,
   isRendering,
 }) => {
   const currentFormat: AspectRatioFormat = clip.aspectRatio || '9:16';
   const isRendered = clip.status === 'completed' || Boolean(clip.renderedVideoUrl);
+  const captionsEnabled = clip.includeCaptions !== false;
 
   const getViralScoreColor = (score: number) => {
     if (score >= 90) return 'text-emerald-400 border-emerald-500/30 bg-emerald-950/40';
@@ -118,7 +121,7 @@ export const ClipCard: React.FC<ClipCardProps> = ({
           {clip.reason}
         </p>
 
-        {/* Timecodes & Topics */}
+        {/* Timecodes, Captions & Topics */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-mono text-[11px] bg-neutral-950 px-2 py-1 rounded border border-neutral-800 text-neutral-300 flex items-center gap-1">
@@ -138,6 +141,21 @@ export const ClipCard: React.FC<ClipCardProps> = ({
             }`}>
               {currentFormat}
             </span>
+
+            {/* Captions Badge Button */}
+            <button
+              type="button"
+              onClick={() => onToggleCaptions && onToggleCaptions(clip.id)}
+              className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded border flex items-center gap-1 transition ${
+                captionsEnabled
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-neutral-800 text-neutral-400 border-neutral-700 line-through opacity-70'
+              }`}
+              title={captionsEnabled ? 'Subtitles ON (Click to disable)' : 'Subtitles OFF (Click to enable)'}
+            >
+              <MessageSquareText className="w-3 h-3" />
+              <span>{captionsEnabled ? 'Captions: ON' : 'Captions: OFF'}</span>
+            </button>
           </div>
 
           {/* Topics */}
