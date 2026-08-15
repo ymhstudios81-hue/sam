@@ -199,17 +199,24 @@ export const ClipCard: React.FC<ClipCardProps> = ({
           {/* Crop Strategy Picker (For 9:16 or 1:1) */}
           {currentFormat !== '16:9' && (
             <div className="flex items-center gap-1 bg-neutral-900 p-0.5 rounded-lg border border-neutral-800 text-xs">
-              {(['center', 'blur', 'custom'] as CropMode[]).map((mode) => (
+              {[
+                { id: 'autoface', label: '🎯 Face Track' },
+                { id: 'split', label: '👥 Split' },
+                { id: 'center', label: 'Center' },
+                { id: 'blur', label: 'Blur' },
+                { id: 'custom', label: 'Pan' },
+              ].map(({ id, label }) => (
                 <button
-                  key={mode}
-                  onClick={() => onCropModeChange(clip.id, mode)}
-                  className={`px-2 py-1 rounded text-[10px] capitalize transition ${
-                    clip.cropMode === mode
+                  key={id}
+                  onClick={() => onCropModeChange(clip.id, id as CropMode)}
+                  className={`px-2 py-1 rounded text-[10px] whitespace-nowrap transition ${
+                    clip.cropMode === id
                       ? 'bg-neutral-800 text-amber-400 font-semibold shadow-sm'
                       : 'text-neutral-500 hover:text-neutral-300'
                   }`}
+                  title={id === 'autoface' ? 'Auto Face & Speaker Tracking' : id === 'split' ? 'Multi-Speaker Split Screen' : `${label} crop`}
                 >
-                  {mode}
+                  {label}
                 </button>
               ))}
             </div>

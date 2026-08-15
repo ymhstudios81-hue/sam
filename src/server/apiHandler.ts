@@ -239,13 +239,18 @@ export function renderClipFfmpeg(
 export function generateSmartTranscriptClips(
   segments: any[],
   clipCount: number = 5,
-  videoDuration?: number
+  videoDuration?: number,
+  customPrompt?: string,
+  durationMode: string = 'auto',
+  minDuration: number = 25,
+  maxDuration: number = 180
 ): any[] {
   if (!segments || segments.length === 0) return [];
 
   const totalDuration = videoDuration || segments[segments.length - 1]?.end || 180;
-  const targetDurationMin = 25;
-  const targetDurationMax = 75;
+  const isAutoDuration = durationMode === 'auto';
+  const targetDurationMin = isAutoDuration ? 20 : (minDuration || 25);
+  const targetDurationMax = isAutoDuration ? Math.min(totalDuration, 900) : (maxDuration || 180);
 
   // Candidates scored by hook power, emotion, questions, numbers, and narrative flow
   interface Candidate {
@@ -266,8 +271,17 @@ export function generateSmartTranscriptClips(
   const viralKeywords = [
     'secret', 'insane', 'bankruptcy', 'million', 'billion', 'mistake', 'never', 'truth',
     'scam', 'unbelievable', 'worst', 'best', 'money', 'failed', 'rule', 'advice', 'trap',
-    'bet', 'died', 'fired', 'quit', 'lost', 'won', 'crazy', 'disaster', 'revenue', 'hacked'
+    'bet', 'died', 'fired', 'quit', 'lost', 'won', 'crazy', 'disaster', 'revenue', 'hacked',
+    'story', 'lesson', 'happened', 'experience', 'decision', 'shocking', 'discovered'
   ];
+
+  const customKeywords = customPrompt
+    ? customPrompt
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 3 && !['find', 'clip', 'clips', 'video', 'claude', 'make', 'want', 'please', 'about'].includes(w))
+    : [];
 
   for (let i = 0; i < segments.length; i++) {
     const startSeg = segments[i];
@@ -280,27 +294,30 @@ export function generateSmartTranscriptClips(
       currentEnd = seg.end;
       const dur = currentEnd - startSeg.start;
 
-      if (dur >= targetDurationMin && dur <= targetDurationMax) {
-        // Calculate score
+      const endsWithPunctuation = /[.!?]$/.test(seg.text.trim());
+
+      if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 15)) {
         let score = 75;
         const lowerText = combinedText.toLowerCase();
 
-        // Hook bonus: question or strong opener in first segment
+        // Custom prompt relevance bonus
+        if (customKeywords.length > 0) {
+          const customMatches = customKeywords.filter((kw) => lowerText.includes(kw)).length;
+          score += customMatches * 15;
+        }
+
         if (startSeg.text.includes('?') || startSeg.text.includes('!')) score += 6;
         if (viralKeywords.some(kw => startSeg.text.toLowerCase().includes(kw))) score += 8;
 
-        // Keyword density
         const keywordMatches = viralKeywords.filter(kw => lowerText.includes(kw)).length;
         score += Math.min(12, keywordMatches * 3);
 
-        // Number/money presence
         if (/\$[\d,]+|\d+%/g.test(combinedText)) score += 5;
+        if (endsWithPunctuation) score += 4;
 
-        // Extract hook (first sentence or first 25 words)
         const sentences = combinedText.split(/[.!?]+/).filter(s => s.trim().length > 0);
         const hookText = sentences[0]?.trim() || combinedText.slice(0, 80);
 
-        // Title from hook or key clause
         let title = hookText
           .replace(/[^\w\s]/g, '')
           .split(' ')
@@ -316,9 +333,11 @@ export function generateSmartTranscriptClips(
           duration: parseFloat(dur.toFixed(2)),
           title: title.charAt(0).toUpperCase() + title.slice(1),
           hook: hookText.slice(0, 110),
-          reason: `High curiosity gap and emotional momentum with ${keywordMatches > 0 ? 'high-stakes keywords' : 'engaging dialogue'} (${dur.toFixed(0)}s duration).`,
-          viral_score: Math.min(98, Math.max(82, score)),
-          topics: ['insights', 'mindset', 'strategy']
+          reason: customPrompt 
+            ? `Matches custom command "${customPrompt.slice(0, 45)}..." with complete natural thought flow (${dur.toFixed(0)}s).`
+            : `Complete natural story narrative with high retention hook (${dur.toFixed(0)}s).`,
+          viral_score: Math.min(99, Math.max(80, score)),
+          topics: customKeywords.length > 0 ? customKeywords.slice(0, 3) : ['insights', 'mindset', 'strategy']
         });
       }
     }
@@ -387,13 +406,17 @@ export async function analyzeTranscriptWithClaudeNode(
   clipCount: number = 5,
   apiKey?: string,
   modelName: string = 'claude-3-7-sonnet-20250219',
-  videoDuration?: number
+  videoDuration?: number,
+  customPrompt?: string,
+  durationMode: string = 'auto',
+  minDuration: number = 25,
+  maxDuration: number = 180
 ): Promise<any[]> {
   const key = apiKey || process.env.ANTHROPIC_API_KEY;
   
   if (!key || !key.trim()) {
     console.log(`No Anthropic key provided. Running smart heuristic clip extraction for ${clipCount} clips.`);
-    return generateSmartTranscriptClips(segments, clipCount, videoDuration);
+    return generateSmartTranscriptClips(segments, clipCount, videoDuration, customPrompt, durationMode, minDuration, maxDuration);
   }
 
   try {
@@ -403,13 +426,26 @@ export async function analyzeTranscriptWithClaudeNode(
 
     const formattedLines = segments.map((s) => `[${s.start.toFixed(2)}s - ${s.end.toFixed(2)}s] ${s.text}`).join('\n');
 
-    const systemPrompt = `You are an elite, world-class short-form video editor whose livelihood depends on finding clips that generate millions of views and massive audience retention on TikTok, YouTube Shorts, and Instagram Reels.
-Analyze the ENTIRE transcript and select EXACTLY ${clipCount} standalone viral moments.
-Criteria:
-1. Hook strength: First 3-5 seconds must hook attention with controversy, intense emotion, secrets, or high curiosity.
-2. Narrative payoff: Cohesive story or lesson ending on a punchline or mic-drop thought.
-3. Length: Preferred 30-60s (allowed 20-90s).
-4. Return ONLY valid JSON matching:
+    const durationInstruction = durationMode === 'auto'
+      ? `AUTO NATURAL DURATION (CRITICAL): Do NOT cut stories, jokes, or explanations in the middle just to fit an arbitrary time limit. If a story takes 45 seconds, 2 minutes, or 5 minutes to complete with its setup and payoff, include the ENTIRE cohesive story from the opening premise to the natural conclusion. Never cut off mid-thought or mid-sentence.`
+      : `Duration limits: Keep each clip between ${minDuration}s and ${maxDuration}s, ensuring natural beginning and ending sentence boundaries.`;
+
+    const customCommandSection = customPrompt && customPrompt.trim()
+      ? `\nUSER SPECIFIC CUSTOM INSTRUCTION & PREFERENCES:\n"${customPrompt.trim()}"\nYou MUST strictly follow the user's custom instruction above when choosing and evaluating clips.\n`
+      : '';
+
+    const systemPrompt = `You are an elite, world-class video editor and viral strategist specializing in finding standalone high-performing clips from podcast/video transcripts.
+Analyze the ENTIRE transcript and select EXACTLY ${clipCount} standalone moments.
+
+${durationInstruction}
+${customCommandSection}
+
+Core Viral Criteria:
+1. Hook strength: The very first sentence/moment must hook the listener immediately.
+2. Complete Narrative Payoff: Always include the full context and punchline/lesson. Do not cut early.
+3. Accurate Timestamps: 'start' and 'end' must align with actual spoken sentences in the transcript.
+
+Return ONLY valid JSON matching this schema:
 {
   "clips": [
     {
@@ -418,19 +454,20 @@ Criteria:
       "end": 68.2,
       "duration": 55.7,
       "title": "Punchy Title (Max 6 words)",
-      "hook": "Exact opening hook quote",
-      "reason": "Why this moment will retain 80%+ audience",
-      "viral_score": 94,
-      "topics": ["startup", "mindset"]
+      "hook": "Exact opening hook quote from transcript",
+      "reason": "Why this moment satisfies the criteria and retains viewers",
+      "viral_score": 95,
+      "topics": ["startup", "story"]
     }
   ]
 }
-IMPORTANT: Provide EXACTLY ${clipCount} clips. 'start' and 'end' MUST be decimal seconds (e.g. 72.5). Avoid overlapping clips.`;
+IMPORTANT: Provide EXACTLY ${clipCount} clips. 'start' and 'end' MUST be decimal seconds matching the transcript. Avoid overlapping clips.`;
 
-    const userPrompt = `Here is the full timestamped transcript (Duration: ${videoDuration || segments[segments.length - 1].end}s):
+    const userPrompt = `Here is the full timestamped transcript (Total Duration: ${videoDuration || segments[segments.length - 1].end}s):
 ${formattedLines}
 
-Select EXACTLY ${clipCount} highest-performing short-form clips. Return ONLY the JSON object.`;
+${customPrompt ? `Remember User's Custom Command: "${customPrompt}"\n` : ''}
+Select EXACTLY ${clipCount} highest-quality clips following all instructions. Return ONLY the JSON object.`;
 
     const response = await anthropic.messages.create({
       model: modelName,
@@ -470,7 +507,7 @@ Select EXACTLY ${clipCount} highest-performing short-form clips. Return ONLY the
     console.warn('Claude API request failed, falling back to smart transcript analysis:', err);
   }
 
-  return generateSmartTranscriptClips(segments, clipCount, videoDuration);
+  return generateSmartTranscriptClips(segments, clipCount, videoDuration, customPrompt, durationMode, minDuration, maxDuration);
 }
 
 // Express Route Dispatcher
@@ -647,13 +684,21 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
       const clipCount = parseInt(req.body?.clip_count || req.body?.clipCount || '5', 10);
       const apiKeyOverride = req.body?.api_key_override || req.body?.apiKey;
       const modelOverride = req.body?.model_override || process.env.CLAUDE_MODEL || 'claude-3-7-sonnet-20250219';
+      const customPrompt = req.body?.custom_prompt || req.body?.customPrompt;
+      const durationMode = req.body?.duration_mode || req.body?.durationMode || 'auto';
+      const minClipDuration = parseInt(req.body?.min_clip_duration || req.body?.minClipDuration || '25', 10);
+      const maxClipDuration = parseInt(req.body?.max_clip_duration || req.body?.maxClipDuration || '180', 10);
 
       const clipsResult = await analyzeTranscriptWithClaudeNode(
         proj.transcriptSegments,
         clipCount,
         apiKeyOverride,
         modelOverride,
-        proj.video?.duration || req.body?.video_duration
+        proj.video?.duration || req.body?.video_duration,
+        customPrompt,
+        durationMode,
+        minClipDuration,
+        maxClipDuration
       );
 
       const formattedClips = clipsResult.map((c, i) => ({

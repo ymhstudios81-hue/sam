@@ -516,31 +516,55 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                {(['center', 'blur', 'custom'] as CropMode[]).map((mode) => (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {[
+                  {
+                    mode: 'autoface' as CropMode,
+                    title: '🎯 AI Face Track',
+                    desc: 'Dynamically pans towards the active speaker in real-time',
+                    recommended: true,
+                  },
+                  {
+                    mode: 'split' as CropMode,
+                    title: '👥 Multi-Speaker Split',
+                    desc: 'Stacked split-screen showing both conversation subjects',
+                  },
+                  {
+                    mode: 'center' as CropMode,
+                    title: 'Center Crop',
+                    desc: `Direct ${aspectRatio === '9:16' ? '1080×1920' : '1080×1080'} center cut`,
+                  },
+                  {
+                    mode: 'blur' as CropMode,
+                    title: 'Blurred Backdrop',
+                    desc: 'Fit full frame with smooth blurred edge fill',
+                  },
+                  {
+                    mode: 'custom' as CropMode,
+                    title: 'Custom Pan',
+                    desc: 'Manually adjust horizontal camera focus position',
+                  },
+                ].map((item) => (
                   <button
-                    key={mode}
+                    key={item.mode}
                     type="button"
-                    onClick={() => setCropMode(mode)}
-                    className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between ${
-                      cropMode === mode
+                    onClick={() => setCropMode(item.mode)}
+                    className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between relative ${
+                      cropMode === item.mode
                         ? 'bg-amber-500/10 border-amber-500 text-white shadow-sm'
                         : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:border-neutral-700'
                     }`}
                   >
-                    <span className="text-xs font-semibold capitalize">
-                      {mode === 'center'
-                        ? 'Center Crop'
-                        : mode === 'blur'
-                        ? 'Blurred Backdrop'
-                        : 'Custom Pan'}
+                    {item.recommended && (
+                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.2 bg-amber-500/20 text-amber-300 text-[8px] font-mono rounded font-bold uppercase">
+                        AI Active
+                      </span>
+                    )}
+                    <span className="text-xs font-semibold">
+                      {item.title}
                     </span>
                     <span className="text-[10px] text-neutral-500 mt-1">
-                      {mode === 'center'
-                        ? `Direct ${aspectRatio === '9:16' ? '1080×1920' : '1080×1080'} center cut`
-                        : mode === 'blur'
-                        ? 'Fit frame with smooth blurred edges'
-                        : 'Adjust horizontal focus position'}
+                      {item.desc}
                     </span>
                   </button>
                 ))}

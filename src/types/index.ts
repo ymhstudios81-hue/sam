@@ -33,7 +33,7 @@ export interface TranscriptData {
   totalDuration?: number;
 }
 
-export type CropMode = 'center' | 'blur' | 'custom';
+export type CropMode = 'autoface' | 'center' | 'blur' | 'custom' | 'split';
 
 export interface Clip {
   id: string;
@@ -102,15 +102,21 @@ export interface Project {
 
 export interface AppSettings {
   anthropicApiKeyConfigured: boolean;
+  anthropicApiKey?: string;
   claudeModel: string;
   defaultClipCount: number;
+  durationMode?: 'auto' | 'custom' | 'short' | 'medium' | 'long'; // 'auto' lets full story play out naturally without mid-sentence cuts
   minClipDuration: number;
   maxClipDuration: number;
+  customPrompt?: string; // custom instructions provided by user to Claude
   outputResolution: string; // e.g. "1080x1920"
   aspectRatio?: AspectRatioFormat; // '9:16' | '16:9' | '1:1'
   defaultAspectRatio?: AspectRatioFormat; // '9:16' | '16:9' | '1:1'
   cropMode: CropMode;
   burnCaptions?: boolean;
+  defaultIncludeCaptions?: boolean;
+  defaultCaptionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
+  defaultShowOverlays?: boolean;
   captionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
   includeDebugOverlays?: boolean;
   includeProgressBar?: boolean;

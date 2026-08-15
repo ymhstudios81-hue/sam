@@ -27,7 +27,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   outputResolution: '1080x1920',
   aspectRatio: '9:16',
   defaultAspectRatio: '9:16',
-  cropMode: 'center',
+  cropMode: 'autoface',
   videoQuality: 'high',
   workspaceDir: 'ShortsForge_Output',
   ffmpegDetected: true,
@@ -199,82 +199,48 @@ export default function App() {
         return;
       }
 
-      let frame = 0;
-      const renderFrame = () => {
-        // Gradient background
-        const grad = ctx.createLinearGradient(0, 0, 1280, 720);
-        grad.addColorStop(0, '#0a0f1d');
-        grad.addColorStop(1, '#1e1b4b');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 1280, 720);
+      // Render initial demo podcast thumbnail frame
+      const grad = ctx.createLinearGradient(0, 0, 1280, 720);
+      grad.addColorStop(0, '#0a0f1d');
+      grad.addColorStop(1, '#1e1b4b');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 1280, 720);
 
-        // Header / Podcast Branding
-        ctx.fillStyle = '#f59e0b';
-        ctx.font = 'bold 34px sans-serif';
-        ctx.fillText('🎙️ DEEP FOCUS PODCAST — EPISODE #48', 80, 110);
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 34px sans-serif';
+      ctx.fillText('🎙️ DEEP FOCUS PODCAST — EPISODE #48', 80, 110);
 
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = 'bold 26px sans-serif';
-        ctx.fillText('Alex Vance — The $100M AI Startup Story', 80, 160);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = 'bold 26px sans-serif';
+      ctx.fillText('Alex Vance — The $100M AI Startup Story', 80, 160);
 
-        // Host Box
-        ctx.fillStyle = '#0f172a';
-        ctx.strokeStyle = '#334155';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(80, 200, 520, 360, 16) : ctx.rect(80, 200, 520, 360);
-        ctx.fill();
-        ctx.stroke();
+      // Host Box
+      ctx.fillStyle = '#0f172a';
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(80, 200, 520, 360, 16) : ctx.rect(80, 200, 520, 360);
+      ctx.fill();
+      ctx.stroke();
 
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 20px sans-serif';
-        ctx.fillText('HOST: Sarah Jenkins', 110, 250);
-        ctx.fillStyle = '#64748b';
-        ctx.font = '15px sans-serif';
-        ctx.fillText('Silicon Valley Insider', 110, 280);
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText('HOST: Sarah Jenkins', 110, 250);
 
-        // Host waveform
-        for (let i = 0; i < 20; i++) {
-          const h = 18 + Math.sin(frame * 0.15 + i * 0.5) * 25;
-          ctx.fillStyle = '#38bdf8';
-          ctx.fillRect(110 + i * 22, 500 - h, 14, h);
-        }
+      // Guest Box
+      ctx.fillStyle = '#0f172a';
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(680, 200, 520, 360, 16) : ctx.rect(680, 200, 520, 360);
+      ctx.fill();
+      ctx.stroke();
 
-        // Guest Box (Alex Vance)
-        ctx.fillStyle = '#0f172a';
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(680, 200, 520, 360, 16) : ctx.rect(680, 200, 520, 360);
-        ctx.fill();
-        ctx.stroke();
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText('GUEST: Alex Vance (Founder)', 710, 250);
 
-        ctx.fillStyle = '#f59e0b';
-        ctx.font = 'bold 20px sans-serif';
-        ctx.fillText('GUEST: Alex Vance (Founder, NeuralFlow)', 710, 250);
-        ctx.fillStyle = '#64748b';
-        ctx.font = '15px sans-serif';
-        ctx.fillText('Creator of Viral v2 AI Engine', 710, 280);
-
-        // Guest waveform (Active Speaker)
-        for (let i = 0; i < 20; i++) {
-          const h = 25 + Math.sin(frame * 0.22 + i * 0.6) * 40;
-          ctx.fillStyle = '#fbbf24';
-          ctx.fillRect(710 + i * 22, 500 - h, 14, h);
-        }
-
-        // Bottom status bar
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 630, 1280, 90);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '16px monospace';
-        ctx.fillText('🔴 REC | 1080p 30fps | Total Episode Length: 02:49.800', 80, 680);
-        ctx.fillStyle = '#f59e0b';
-        ctx.fillText('ShortsForge AI High Hook Score Detected (Clip #1 @ 00:13)', 680, 680);
-
-        frame++;
-      };
-
+      // Generate pristine placeholder video blob URL
       const stream = canvas.captureStream(30);
       const mimeType =
         typeof MediaRecorder !== 'undefined' &&
@@ -291,16 +257,11 @@ export default function App() {
       }
 
       const chunks: Blob[] = [];
-      const animInterval = setInterval(renderFrame, 1000 / 30);
-
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunks.push(e.data);
-        }
+        if (e.data && e.data.size > 0) chunks.push(e.data);
       };
 
       mediaRecorder.onstop = () => {
-        clearInterval(animInterval);
         const blob = new Blob(chunks, { type: 'video/webm' });
         const previewUrl = URL.createObjectURL(blob);
 
@@ -334,7 +295,7 @@ export default function App() {
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
           mediaRecorder.stop();
         }
-      }, 1000);
+      }, 100);
     } catch (err) {
       console.warn('Canvas stream generation error:', err);
       setIsUploadingVideo(false);
@@ -369,14 +330,23 @@ export default function App() {
   };
 
   // Claude AI Transcript Analysis Handler
-  const handleAnalyzeWithClaude = async () => {
+  const handleAnalyzeWithClaude = async (
+    customPrompt?: string,
+    durationMode: 'auto' | 'custom' | 'short' | 'medium' | 'long' = 'auto'
+  ) => {
     if (!activeProject?.transcript?.segments.length) {
       showNotification('Please upload a timestamped transcript first.', 'error');
       return;
     }
 
     setIsAnalyzing(true);
-    showNotification(`Claude is evaluating transcript to extract TOP ${clipCount} viral clips...`, 'info');
+    const modeLabel = durationMode === 'auto' ? 'Auto Complete Story' : `${durationMode} duration`;
+    showNotification(
+      customPrompt 
+        ? `Claude analyzing transcript with custom instruction (${modeLabel})...`
+        : `Claude is evaluating transcript to extract TOP ${clipCount} viral clips (${modeLabel})...`,
+      'info'
+    );
 
     try {
       // 1. Attempt server-side Anthropic / smart analysis API endpoint
@@ -389,6 +359,10 @@ export default function App() {
           video_duration: activeProject.video?.duration,
           api_key_override: settings.anthropicApiKey,
           model_override: settings.claudeModel,
+          custom_prompt: customPrompt,
+          duration_mode: durationMode,
+          min_clip_duration: settings.minClipDuration,
+          max_clip_duration: settings.maxClipDuration,
         }),
       });
 
@@ -403,7 +377,12 @@ export default function App() {
             updatedAt: new Date().toISOString(),
           }));
           setIsAnalyzing(false);
-          showNotification(`Discovered ${result.clips.length} high-viral moments!`, 'success');
+          showNotification(
+            customPrompt
+              ? `Discovered ${result.clips.length} moments matching your instruction!`
+              : `Discovered ${result.clips.length} high-viral moments!`,
+            'success'
+          );
           return;
         }
       }
@@ -418,7 +397,11 @@ export default function App() {
         clipCount,
         activeProject.video?.duration,
         settings.aspectRatio || '9:16',
-        settings.cropMode || 'center'
+        settings.cropMode || 'center',
+        customPrompt,
+        durationMode,
+        settings.minClipDuration,
+        settings.maxClipDuration
       );
 
       updateActiveProject((prev) => ({
@@ -430,8 +413,13 @@ export default function App() {
       }));
 
       setIsAnalyzing(false);
-      showNotification(`Discovered ${generatedClips.length} high-viral moments from transcript!`, 'success');
-    }, 1200);
+      showNotification(
+        customPrompt
+          ? `Discovered ${generatedClips.length} clips tailored to your instruction.`
+          : `Discovered ${generatedClips.length} high-viral moments from transcript!`,
+        'success'
+      );
+    }, 1000);
   };
 
   // Toggle Clip Selection

@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Play, Pause, AlertCircle, Volume2, Sparkles } from 'lucide-react';
+import { Play, Pause, AlertCircle, Volume2, Sparkles, User, Crosshair, Users } from 'lucide-react';
 import { VideoMetadata, CropMode, AspectRatioFormat, TranscriptData } from '../../types';
 import { formatSecondsToTimecode } from '../../services/transcriptParser';
+import { globalSpeakerTracker, SpeakerTrackingState } from '../../services/faceTracker';
 
 interface VideoPlayerWithFramingProps {
   video?: VideoMetadata | null;
@@ -99,6 +100,22 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
       }
     }
   }, [isPlaying, nativeVideoPlayable, hasVideoError]);
+
+  // Live Speaker & Face Tracking state
+  const [trackingState, setTrackingState] = useState<SpeakerTrackingState>(() =>
+    globalSpeakerTracker.update(null as any, currentTime, transcript)
+  );
+
+  // Update tracking on each time step
+  useEffect(() => {
+    if (cropMode === 'autoface' || cropMode === 'split') {
+      const source = (nativeVideoPlayable && !hasVideoError && videoRef.current) 
+        ? videoRef.current 
+        : (canvasRef.current || (null as any));
+      const nextTrack = globalSpeakerTracker.update(source, currentTime, transcript);
+      setTrackingState(nextTrack);
+    }
+  }, [currentTime, cropMode, transcript, nativeVideoPlayable, hasVideoError]);
 
   // Find active subtitle dialogue segment at currentTime
   const currentSubtitle = React.useMemo(() => {
@@ -389,6 +406,44 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
           {/* 9:16 Vertical Overlay */}
           {aspectRatio === '9:16' && (
             <>
+              {cropMode === 'autoface' && (
+                <div
+                  className="h-full aspect-[9/16] border-2 border-amber-400 bg-amber-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] transition-transform duration-200 ease-out"
+                  style={{
+                    transform: `translateX(${(trackingState.smoothedPanX - 0.5) * 120}%)`,
+                  }}
+                >
+                  <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-neutral-950 px-2 py-0.5 rounded text-[10px] font-mono font-bold shadow-lg">
+                    <Crosshair className="w-3 h-3 animate-spin text-neutral-950" />
+                    <span>AI Face Track ({trackingState.activeSpeaker.toUpperCase()})</span>
+                  </div>
+
+                  {/* Tracking reticle corners */}
+                  <div className="absolute inset-4 border border-dashed border-amber-400/40 rounded-lg pointer-events-none flex flex-col justify-between p-2">
+                    <div className="flex justify-between items-center text-[9px] font-mono text-amber-300 bg-black/60 px-1.5 py-0.5 rounded self-start">
+                      <span>Tracking Active Speaker</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {cropMode === 'split' && (
+                <div className="h-full aspect-[9/16] border-2 border-purple-400 bg-purple-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] flex flex-col">
+                  {/* Top Speaker Box */}
+                  <div className="flex-1 border-b-2 border-amber-400 relative flex items-start p-2 bg-neutral-900/30">
+                    <span className="bg-purple-600 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded">
+                      TOP: Speaker 1 (Host)
+                    </span>
+                  </div>
+                  {/* Bottom Speaker Box */}
+                  <div className="flex-1 relative flex items-start p-2 bg-neutral-900/30">
+                    <span className="bg-amber-600 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded">
+                      BOTTOM: Speaker 2 (Guest)
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {cropMode === 'center' && (
                 <div className="h-full aspect-[9/16] border-2 border-amber-400/90 bg-amber-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]">
                   <div className="absolute top-2 left-2 flex items-center gap-1 bg-amber-500 text-neutral-950 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shadow">
@@ -432,6 +487,20 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
           {/* 1:1 Square Overlay */}
           {aspectRatio === '1:1' && (
             <>
+              {cropMode === 'autoface' && (
+                <div
+                  className="h-full aspect-square border-2 border-amber-400 bg-amber-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] transition-transform duration-200 ease-out"
+                  style={{
+                    transform: `translateX(${(trackingState.smoothedPanX - 0.5) * 80}%)`,
+                  }}
+                >
+                  <div className="absolute top-2 left-2 flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 text-neutral-950 px-2 py-0.5 rounded text-[10px] font-mono font-bold shadow">
+                    <Crosshair className="w-3 h-3 text-neutral-950" />
+                    <span>AI Face Track ({trackingState.activeSpeaker.toUpperCase()})</span>
+                  </div>
+                </div>
+              )}
+
               {cropMode === 'center' && (
                 <div className="h-full aspect-square border-2 border-purple-400/90 bg-purple-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]">
                   <div className="absolute top-2 left-2 flex items-center gap-1 bg-purple-500 text-neutral-950 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shadow">

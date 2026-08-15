@@ -211,6 +211,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onChange={(e) => setDefaultCropMode(e.target.value as CropMode)}
                 className="w-full px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-700 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
               >
+                <option value="autoface">🎯 Auto Face & Active Speaker Tracking (Recommended)</option>
+                <option value="split">👥 Multi-Speaker Split Screen (Stacked Top/Bottom)</option>
                 <option value="center">Center Crop (Direct Center Cut)</option>
                 <option value="blur">Fit with Blurred Background</option>
                 <option value="custom">Custom Horizontal Pan</option>

@@ -330,20 +330,27 @@ export function parseTranscript(rawText: string, videoDuration?: number): Transc
 
 /**
  * Smart algorithmic transcript analyzer when Claude API is not configured or for offline fallback.
- * Extracts N high-retention clips distributed across the transcript matching viral criteria.
+ * Extracts N high-retention clips distributed across the transcript matching viral criteria,
+ * user custom commands, and natural story boundaries.
  */
 export function generateSmartTranscriptClips(
   segments: TranscriptSegment[],
   clipCount: number = 5,
   videoDuration?: number,
   aspectRatio: string = '9:16',
-  cropMode: string = 'center'
+  cropMode: string = 'autoface',
+  customPrompt?: string,
+  durationMode: string = 'auto',
+  minDuration: number = 25,
+  maxDuration: number = 180
 ): any[] {
   if (!segments || segments.length === 0) return [];
 
   const totalDuration = videoDuration || segments[segments.length - 1]?.end || 180;
-  const targetDurationMin = 25;
-  const targetDurationMax = 75;
+  const isAutoDuration = durationMode === 'auto';
+  // In auto duration mode, allow stories of any natural duration (from 20s up to whole video/15 mins)
+  const targetDurationMin = isAutoDuration ? 20 : (minDuration || 25);
+  const targetDurationMax = isAutoDuration ? Math.min(totalDuration, 900) : (maxDuration || 180);
 
   interface Candidate {
     startIndex: number;
@@ -363,8 +370,17 @@ export function generateSmartTranscriptClips(
   const viralKeywords = [
     'secret', 'insane', 'bankruptcy', 'million', 'billion', 'mistake', 'never', 'truth',
     'scam', 'unbelievable', 'worst', 'best', 'money', 'failed', 'rule', 'advice', 'trap',
-    'bet', 'died', 'fired', 'quit', 'lost', 'won', 'crazy', 'disaster', 'revenue', 'hacked'
+    'bet', 'died', 'fired', 'quit', 'lost', 'won', 'crazy', 'disaster', 'revenue', 'hacked',
+    'story', 'lesson', 'happened', 'experience', 'decision', 'shocking', 'discovered'
   ];
+
+  const customKeywords = customPrompt
+    ? customPrompt
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 3 && !['find', 'clip', 'clips', 'video', 'claude', 'make', 'want', 'please', 'about'].includes(w))
+    : [];
 
   for (let i = 0; i < segments.length; i++) {
     const startSeg = segments[i];
@@ -377,9 +393,17 @@ export function generateSmartTranscriptClips(
       currentEnd = seg.end;
       const dur = currentEnd - startSeg.start;
 
-      if (dur >= targetDurationMin && dur <= targetDurationMax) {
+      const endsWithPunctuation = /[.!?]$/.test(seg.text.trim());
+
+      if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 15)) {
         let score = 75;
         const lowerText = combinedText.toLowerCase();
+
+        // Custom command matching bonus
+        if (customKeywords.length > 0) {
+          const customMatches = customKeywords.filter((kw) => lowerText.includes(kw)).length;
+          score += customMatches * 15;
+        }
 
         if (startSeg.text.includes('?') || startSeg.text.includes('!')) score += 6;
         if (viralKeywords.some((kw) => startSeg.text.toLowerCase().includes(kw))) score += 8;
@@ -388,6 +412,7 @@ export function generateSmartTranscriptClips(
         score += Math.min(12, keywordMatches * 3);
 
         if (/\$[\d,]+|\d+%/g.test(combinedText)) score += 5;
+        if (endsWithPunctuation) score += 4;
 
         const sentences = combinedText.split(/[.!?]+/).filter((s) => s.trim().length > 0);
         const hookText = sentences[0]?.trim() || combinedText.slice(0, 80);
@@ -407,9 +432,11 @@ export function generateSmartTranscriptClips(
           duration: parseFloat(dur.toFixed(2)),
           title: title.charAt(0).toUpperCase() + title.slice(1),
           hook: hookText.slice(0, 110),
-          reason: `High curiosity gap with ${keywordMatches > 0 ? 'high-stakes storytelling' : 'dynamic speech'} (${dur.toFixed(0)}s duration).`,
-          viral_score: Math.min(98, Math.max(82, score)),
-          topics: ['insights', 'mindset', 'strategy']
+          reason: customPrompt
+            ? `Matched instruction "${customPrompt.slice(0, 40)}..." with complete story narrative (${dur.toFixed(0)}s).`
+            : `Complete natural story narrative with high retention hook (${dur.toFixed(0)}s).`,
+          viral_score: Math.min(99, Math.max(80, score)),
+          topics: customKeywords.length > 0 ? customKeywords.slice(0, 3) : ['insights', 'mindset', 'strategy']
         });
       }
     }
