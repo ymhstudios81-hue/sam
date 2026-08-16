@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Play, Pause, Clock, Sliders, Scissors, AlertCircle, Check, Smartphone, Monitor, Square, MessageSquareText, ShieldAlert, Sparkles, CheckCircle2 } from 'lucide-react';
+import { X, Play, Pause, Clock, Sliders, Scissors, AlertCircle, Check, Smartphone, Monitor, Square, MessageSquareText, ShieldAlert, Sparkles, CheckCircle2, Download } from 'lucide-react';
 import { Clip, CropMode, AspectRatioFormat, VideoMetadata, TranscriptData } from '../../types';
-import { formatSecondsToTimecode } from '../../services/transcriptParser';
+import { formatSecondsToTimecode, downloadSubtitleFile } from '../../services/transcriptParser';
 import { VideoPlayerWithFraming } from '../VideoPlayer/VideoPlayerWithFraming';
 
 interface ClipPreviewModalProps {
@@ -219,6 +219,11 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
               showFramingOverlay={true}
               enable4kFilter={enable4kFilter}
               onToggle4kFilter={setEnable4kFilter}
+              includeCaptions={includeCaptions}
+              captionStyle={captionStyle}
+              onToggleCaptions={setIncludeCaptions}
+              clipHook={clip.hook}
+              clipTitle={clip.title}
               className="w-full max-h-[360px]"
             />
 
@@ -325,18 +330,34 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
                 <MessageSquareText className="w-4 h-4 text-amber-400" />
                 <span>Captions & Subtitles</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setIncludeCaptions(!includeCaptions)}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-bold font-mono transition flex items-center gap-1.5 ${
-                  includeCaptions
-                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                    : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
-                }`}
-              >
-                {includeCaptions ? <CheckCircle2 className="w-3.5 h-3.5" /> : null}
-                <span>{includeCaptions ? 'Burn Subtitles: ON' : 'Burn Subtitles: OFF'}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const segs = transcript?.segments?.filter(s => s.end >= numStart && s.start <= numEnd) || [];
+                    const safeName = (clip.title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+                    downloadSubtitleFile(segs.length > 0 ? segs : [{ start: numStart, end: numEnd, text: clip.hook || clip.title }], `clip_${clip.rank}_${safeName}.srt`, 'srt', numStart);
+                  }}
+                  className="px-2.5 py-1 rounded-full text-[11px] font-mono font-medium transition flex items-center gap-1.5 bg-neutral-850 hover:bg-neutral-800 text-neutral-300 border border-neutral-700 hover:text-white"
+                  title="Download .SRT subtitle file for this clip"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Download .SRT</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIncludeCaptions(!includeCaptions)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-bold font-mono transition flex items-center gap-1.5 ${
+                    includeCaptions
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                      : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+                  }`}
+                >
+                  {includeCaptions ? <CheckCircle2 className="w-3.5 h-3.5" /> : null}
+                  <span>{includeCaptions ? 'Burn Subtitles: ON' : 'Burn Subtitles: OFF'}</span>
+                </button>
+              </div>
             </div>
 
             {includeCaptions && (

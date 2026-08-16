@@ -348,21 +348,175 @@ export async function logTimingAndDiscrepancies(
   };
 }
 
+// Helper to convert decimal seconds to ASS timecode: h:mm:ss.cs
+function toAssTimecode(sec: number): string {
+  const s = Math.max(0, sec);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  const cs = Math.floor((s % 1) * 100);
+  const pad = (n: number, z = 2) => n.toString().padStart(z, '0');
+  return `${hrs}:${pad(mins)}:${pad(secs)}.${pad(cs, 2)}`;
+}
+
+// Helper to convert decimal seconds to SRT timecode: hh:mm:ss,mmm
+function toSrtTimecode(sec: number): string {
+  const s = Math.max(0, sec);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  const ms = Math.floor((s % 1) * 1000);
+  const pad = (n: number, z = 2) => n.toString().padStart(z, '0');
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)},${pad(ms, 3)}`;
+}
+
+// Generate Advanced SubStation Alpha (.ass) subtitle file content
+function generateAssScript(
+  segments: any[],
+  clipStart: number,
+  clipDuration: number,
+  captionStyle = 'viral_yellow',
+  aspectRatio = '9:16',
+  clipHook?: string,
+  clipTitle?: string
+): string {
+  const isVertical = aspectRatio === '9:16';
+  const isSquare = aspectRatio === '1:1';
+  const width = isVertical ? 1080 : 1920;
+  const height = isVertical ? 1920 : (isSquare ? 1080 : 1080);
+  const fontSize = isVertical ? 56 : 44;
+  const marginV = isVertical ? 280 : 110;
+
+  // ASS Colors in &HAABBGGRR format
+  let styleLine = '';
+  if (captionStyle === 'viral_yellow') {
+    // Bright Yellow primary &H0000D7FF (BGR: FF D7 00), Black outline 5px, Translucent drop shadow
+    styleLine = `Style: Default,Nimbus Sans,${fontSize},&H0000D7FF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,3,2,60,60,${marginV},1`;
+  } else if (captionStyle === 'clean_white') {
+    // Pure White primary &H00FFFFFF, Heavy Black outline 6px
+    styleLine = `Style: Default,Nimbus Sans,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,60,60,${marginV},1`;
+  } else {
+    // Minimal Gray
+    styleLine = `Style: Default,Nimbus Sans,${fontSize - 8},&H00F0F0F0,&H000000FF,&H00151515,&H60000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,${marginV},1`;
+  }
+
+  const header = `[Script Info]
+Title: ShortsForge Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: None
+PlayResX: ${width}
+PlayResY: ${height}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+${styleLine}
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
+  const clipEnd = clipStart + clipDuration;
+  let relevant = (segments || []).filter(
+    (s) => s && s.end >= clipStart && s.start <= clipEnd && s.text && s.text.trim()
+  );
+
+  if (relevant.length === 0 && (clipHook || clipTitle)) {
+    relevant = [
+      {
+        start: clipStart,
+        end: Math.min(clipEnd, clipStart + 3.5),
+        text: clipHook || clipTitle,
+      },
+    ];
+  }
+
+  const maxChars = isVertical ? 22 : 36;
+  const events = relevant
+    .map((seg) => {
+      const startRel = Math.max(0, seg.start - clipStart);
+      const endRel = Math.min(clipDuration, Math.max(startRel + 0.4, seg.end - clipStart));
+
+      // Wrap words into compact lines for mobile screens
+      const words = seg.text.trim().split(/\s+/);
+      const lines: string[] = [];
+      let curLine = '';
+
+      for (const w of words) {
+        if ((curLine + ' ' + w).trim().length <= maxChars) {
+          curLine = (curLine ? curLine + ' ' : '') + w;
+        } else {
+          if (curLine) lines.push(curLine);
+          curLine = w;
+        }
+      }
+      if (curLine) lines.push(curLine);
+
+      let textFormatted = lines.join('\\N');
+      if (captionStyle === 'viral_yellow') {
+        textFormatted = `{\\b1}${textFormatted}{\\b0}`;
+      }
+
+      return `Dialogue: 0,${toAssTimecode(startRel)},${toAssTimecode(endRel)},Default,,0,0,0,,${textFormatted}`;
+    })
+    .join('\n');
+
+  return header + events + '\n';
+}
+
+// Generate companion SRT file content
+function generateSrtScript(
+  segments: any[],
+  clipStart: number,
+  clipDuration: number,
+  clipHook?: string,
+  clipTitle?: string
+): string {
+  const clipEnd = clipStart + clipDuration;
+  let relevant = (segments || []).filter(
+    (s) => s && s.end >= clipStart && s.start <= clipEnd && s.text && s.text.trim()
+  );
+
+  if (relevant.length === 0 && (clipHook || clipTitle)) {
+    relevant = [
+      {
+        start: clipStart,
+        end: Math.min(clipEnd, clipStart + 3.5),
+        text: clipHook || clipTitle,
+      },
+    ];
+  }
+
+  return relevant
+    .map((seg, idx) => {
+      const startRel = Math.max(0, seg.start - clipStart);
+      const endRel = Math.min(clipDuration, Math.max(startRel + 0.4, seg.end - clipStart));
+      const speakerPrefix = seg.speaker ? `[${seg.speaker}] ` : '';
+      return `${idx + 1}\n${toSrtTimecode(startRel)} --> ${toSrtTimecode(endRel)}\n${speakerPrefix}${seg.text.trim()}\n`;
+    })
+    .join('\n');
+}
+
 // Generate verified FFmpeg filter graph for multiple aspect ratios and crop modes
 // Guaranteed to produce stable 30 FPS Constant Frame Rate (CFR) and zeroed PTS timestamps
 function buildFfmpegFilter(
   aspectRatio: string = '9:16',
   cropMode: string = 'center',
-  panPercent: number = 50.0
+  panPercent: number = 50.0,
+  assFilePath?: string
 ): { filterType: 'vf' | 'filter_complex'; filterString: string; mapVideo: string } {
   const panFactor = Math.max(0, Math.min(100, panPercent)) / 100.0;
-  
+  const assPart = assFilePath
+    ? `,ass='${assFilePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")}'`
+    : '';
+
   // 1. Simple Clip / Original Aspect Ratio / No crop
   if (aspectRatio === 'original' || cropMode === 'none') {
     return {
       filterType: 'vf',
-      filterString: 'fps=30,setpts=PTS-STARTPTS',
-      mapVideo: '0:v:0'
+      filterString: `fps=30,setpts=PTS-STARTPTS${assPart}`,
+      mapVideo: '0:v:0',
     };
   }
 
@@ -371,14 +525,14 @@ function buildFfmpegFilter(
     if (cropMode === 'custom') {
       return {
         filterType: 'vf',
-        filterString: `crop=min(iw\\,ih*16/9):min(ih\\,iw*9/16):(iw-min(iw\\,ih*16/9))*${panFactor.toFixed(4)}:(ih-min(ih\\,iw*9/16))/2,scale=1920:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS`,
-        mapVideo: '0:v:0'
+        filterString: `crop=min(iw\\,ih*16/9):min(ih\\,iw*9/16):(iw-min(iw\\,ih*16/9))*${panFactor.toFixed(4)}:(ih-min(ih\\,iw*9/16))/2,scale=1920:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS${assPart}`,
+        mapVideo: '0:v:0',
       };
     } else {
       return {
         filterType: 'vf',
-        filterString: 'scale=1920:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS',
-        mapVideo: '0:v:0'
+        filterString: `scale=1920:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS${assPart}`,
+        mapVideo: '0:v:0',
       };
     }
   }
@@ -388,15 +542,15 @@ function buildFfmpegFilter(
     if (cropMode === 'custom') {
       return {
         filterType: 'vf',
-        filterString: `crop=ih:ih:(iw-ih)*${panFactor.toFixed(4)}:0,scale=1080:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS`,
-        mapVideo: '0:v:0'
+        filterString: `crop=ih:ih:(iw-ih)*${panFactor.toFixed(4)}:0,scale=1080:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS${assPart}`,
+        mapVideo: '0:v:0',
       };
     } else {
       // Center crop
       return {
         filterType: 'vf',
-        filterString: 'crop=ih:ih:(iw-ih)/2:0,scale=1080:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS',
-        mapVideo: '0:v:0'
+        filterString: `crop=ih:ih:(iw-ih)/2:0,scale=1080:1080:flags=lanczos,fps=30,setpts=PTS-STARTPTS${assPart}`,
+        mapVideo: '0:v:0',
       };
     }
   }
@@ -405,21 +559,21 @@ function buildFfmpegFilter(
   if (cropMode === 'custom') {
     return {
       filterType: 'vf',
-      filterString: `crop=ih*9/16:ih:(iw-ih*9/16)*${panFactor.toFixed(4)}:0,scale=1080:1920:flags=lanczos,fps=30,setpts=PTS-STARTPTS`,
-      mapVideo: '0:v:0'
+      filterString: `crop=ih*9/16:ih:(iw-ih*9/16)*${panFactor.toFixed(4)}:0,scale=1080:1920:flags=lanczos,fps=30,setpts=PTS-STARTPTS${assPart}`,
+      mapVideo: '0:v:0',
     };
   } else if (cropMode === 'split') {
     return {
       filterType: 'filter_complex',
-      filterString: '[0:v]crop=iw/2:ih:0:0,scale=1080:960:flags=lanczos,fps=30,setpts=PTS-STARTPTS[top];[0:v]crop=iw/2:ih:iw/2:0,scale=1080:960:flags=lanczos,fps=30,setpts=PTS-STARTPTS[bot];[top][bot]vstack,fps=30,setpts=PTS-STARTPTS[outv]',
-      mapVideo: '[outv]'
+      filterString: `[0:v]crop=iw/2:ih:0:0,scale=1080:960:flags=lanczos,fps=30,setpts=PTS-STARTPTS[top];[0:v]crop=iw/2:ih:iw/2:0,scale=1080:960:flags=lanczos,fps=30,setpts=PTS-STARTPTS[bot];[top][bot]vstack,fps=30,setpts=PTS-STARTPTS${assPart}[outv]`,
+      mapVideo: '[outv]',
     };
   } else {
     // 9:16 Center Crop (clean, high performance)
     return {
       filterType: 'vf',
-      filterString: 'crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920:flags=lanczos,fps=30,setpts=PTS-STARTPTS',
-      mapVideo: '0:v:0'
+      filterString: `crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920:flags=lanczos,fps=30,setpts=PTS-STARTPTS${assPart}`,
+      mapVideo: '0:v:0',
     };
   }
 }
@@ -430,14 +584,76 @@ export async function renderClipFfmpeg(
   outputPath: string,
   start: number,
   duration: number,
-  aspectRatio: string,
-  cropMode: string,
-  panPercent: number,
-  onProgress?: (progress: number) => void
+  aspectRatio: string = '9:16',
+  cropMode: string = 'center',
+  panPercent: number = 50.0,
+  optionsOrProgress?:
+    | {
+        includeCaptions?: boolean;
+        captionStyle?: string;
+        transcriptSegments?: any[];
+        clipHook?: string;
+        clipTitle?: string;
+        onProgress?: (progress: number) => void;
+      }
+    | ((progress: number) => void)
 ): Promise<string> {
   const requestedStart = Math.max(0, parseFloat(start.toFixed(3)));
   const requestedDuration = Math.max(0.1, parseFloat(duration.toFixed(3)));
   const requestedEnd = parseFloat((requestedStart + requestedDuration).toFixed(3));
+
+  let onProgress: ((progress: number) => void) | undefined;
+  let includeCaptions = true;
+  let captionStyle = 'viral_yellow';
+  let transcriptSegments: any[] = [];
+  let clipHook: string | undefined;
+  let clipTitle: string | undefined;
+
+  if (typeof optionsOrProgress === 'function') {
+    onProgress = optionsOrProgress;
+  } else if (optionsOrProgress && typeof optionsOrProgress === 'object') {
+    onProgress = optionsOrProgress.onProgress;
+    includeCaptions = optionsOrProgress.includeCaptions !== false;
+    captionStyle = optionsOrProgress.captionStyle || 'viral_yellow';
+    transcriptSegments = optionsOrProgress.transcriptSegments || [];
+    clipHook = optionsOrProgress.clipHook;
+    clipTitle = optionsOrProgress.clipTitle;
+  }
+
+  // Generate ASS and SRT subtitle files if captions are requested
+  let assFilePath: string | undefined;
+  const srtFilePath = outputPath.replace(/\.mp4$/i, '') + '.srt';
+
+  if (includeCaptions && captionStyle !== 'none') {
+    try {
+      const assContent = generateAssScript(
+        transcriptSegments,
+        requestedStart,
+        requestedDuration,
+        captionStyle,
+        aspectRatio,
+        clipHook,
+        clipTitle
+      );
+      const generatedAssPath = outputPath + '.ass';
+      fs.writeFileSync(generatedAssPath, assContent, 'utf-8');
+      assFilePath = generatedAssPath;
+      console.log(`✅ Subtitles generated: ${assFilePath}`);
+
+      // Also create companion standalone SRT file
+      const srtContent = generateSrtScript(
+        transcriptSegments,
+        requestedStart,
+        requestedDuration,
+        clipHook,
+        clipTitle
+      );
+      fs.writeFileSync(srtFilePath, srtContent, 'utf-8');
+    } catch (subErr) {
+      console.warn('⚠️ Could not generate ASS subtitles, falling back to clean video:', subErr);
+      assFilePath = undefined;
+    }
+  }
 
   // 1. Inspect source video metadata
   let sourceMeta: any = null;
@@ -465,9 +681,15 @@ export async function renderClipFfmpeg(
   console.log(`  Requested Duration: ${requestedDuration}s`);
   console.log(`  Aspect Ratio: ${aspectRatio}`);
   console.log(`  Crop Mode: ${cropMode} (Pan: ${panPercent}%)`);
+  console.log(`  Captions: ${includeCaptions ? `ON (${captionStyle})` : 'OFF'}`);
   console.log('--------------------------------------------------');
 
-  const { filterType, filterString, mapVideo } = buildFfmpegFilter(aspectRatio, cropMode, panPercent);
+  const { filterType, filterString, mapVideo } = buildFfmpegFilter(
+    aspectRatio,
+    cropMode,
+    panPercent,
+    assFilePath
+  );
 
   // Construct safe, frame-accurate FFmpeg argument pipeline
   const args: string[] = [
@@ -1162,7 +1384,11 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
         custom_pan_percent = 50.0,
         clip_title = 'clip',
         clip_rank = 1,
-        project_id = 'default'
+        project_id = 'default',
+        include_captions = true,
+        caption_style = 'viral_yellow',
+        transcript_segments = [],
+        clip_hook = '',
       } = req.body || {};
 
       // Determine valid source video path
@@ -1177,6 +1403,15 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
         }
       }
 
+      // If segments not passed in req.body, try to fetch from project
+      let segments = Array.isArray(transcript_segments) ? transcript_segments : [];
+      if (segments.length === 0 && project_id) {
+        const proj = projects.get(project_id);
+        if (proj?.transcriptSegments) {
+          segments = proj.transcriptSegments;
+        }
+      }
+
       const projectOutDir = path.join(currentWorkspaceDir, `Project_${project_id.slice(-8)}`);
       if (!fs.existsSync(projectOutDir)) fs.mkdirSync(projectOutDir, { recursive: true });
 
@@ -1184,6 +1419,7 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
       const formatPrefix = (aspect_ratio || '9:16').replace(':', 'x');
       const outName = `clip_${String(clip_rank).padStart(2, '0')}_${formatPrefix}_${safeTitle}.mp4`;
       const outPath = path.join(projectOutDir, outName);
+      const srtPath = path.join(projectOutDir, `clip_${String(clip_rank).padStart(2, '0')}_${formatPrefix}_${safeTitle}.srt`);
 
       try {
         await renderClipFfmpeg(
@@ -1193,7 +1429,14 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
           parseFloat(duration),
           aspect_ratio,
           crop_mode,
-          parseFloat(custom_pan_percent)
+          parseFloat(custom_pan_percent),
+          {
+            includeCaptions: include_captions !== false,
+            captionStyle: caption_style || 'viral_yellow',
+            transcriptSegments: segments,
+            clipHook: clip_hook,
+            clipTitle: clip_title,
+          }
         );
 
         const outMeta = await extractFfprobeMetadata(outPath);
@@ -1203,9 +1446,11 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
           success: true,
           outputFilePath: outPath,
           outputFileUrl: `/api/files/download?path=${encodeURIComponent(outPath)}`,
+          srtFilePath: fs.existsSync(srtPath) ? srtPath : undefined,
+          srtFileUrl: fs.existsSync(srtPath) ? `/api/files/download?path=${encodeURIComponent(srtPath)}` : undefined,
           filename: outName,
           metadata: outMeta,
-          diagnostics: timingDiagnostics
+          diagnostics: timingDiagnostics,
         });
       } catch (renderErr: any) {
         console.error('Direct render error:', renderErr);
@@ -1462,8 +1707,15 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
                 targetAspectRatio,
                 targetCropMode,
                 targetCustomPan,
-                (prog) => {
-                  job.progress = prog;
+                {
+                  includeCaptions: clip.includeCaptions !== false,
+                  captionStyle: clip.captionStyle || 'viral_yellow',
+                  transcriptSegments: proj.transcriptSegments || [],
+                  clipHook: clip.hook,
+                  clipTitle: clip.title,
+                  onProgress: (prog) => {
+                    job.progress = prog;
+                  },
                 }
               );
               job.status = 'completed';

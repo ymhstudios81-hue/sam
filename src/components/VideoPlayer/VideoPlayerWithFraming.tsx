@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Play, Pause, AlertCircle, Volume2, Sparkles, User, Crosshair, Users } from 'lucide-react';
-import { VideoMetadata, CropMode, AspectRatioFormat, TranscriptData } from '../../types';
+import { Play, Pause, AlertCircle, Volume2, Sparkles, User, Crosshair, Users, MessageSquareText } from 'lucide-react';
+import { VideoMetadata, CropMode, AspectRatioFormat, TranscriptData, TranscriptSegment } from '../../types';
 import { formatSecondsToTimecode } from '../../services/transcriptParser';
 import { globalSpeakerTracker, SpeakerTrackingState } from '../../services/faceTracker';
 
@@ -19,6 +19,11 @@ interface VideoPlayerWithFramingProps {
   showFramingOverlay?: boolean;
   enable4kFilter?: boolean;
   onToggle4kFilter?: (enabled: boolean) => void;
+  includeCaptions?: boolean;
+  captionStyle?: 'viral_yellow' | 'clean_white' | 'minimal' | 'none';
+  onToggleCaptions?: (enabled: boolean) => void;
+  clipHook?: string;
+  clipTitle?: string;
   className?: string;
   autoLoopClip?: boolean;
 }
@@ -38,10 +43,16 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
   showFramingOverlay = true,
   enable4kFilter,
   onToggle4kFilter,
+  includeCaptions = true,
+  captionStyle = 'viral_yellow',
+  onToggleCaptions,
+  clipHook,
+  clipTitle,
   className = '',
   autoLoopClip = true,
 }) => {
   const [internal4k, setInternal4k] = useState<boolean>(enable4kFilter ?? false);
+  const [internalCaptions, setInternalCaptions] = useState<boolean>(includeCaptions ?? true);
 
   useEffect(() => {
     if (enable4kFilter !== undefined) {
@@ -49,7 +60,14 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
     }
   }, [enable4kFilter]);
 
+  useEffect(() => {
+    if (includeCaptions !== undefined) {
+      setInternalCaptions(includeCaptions);
+    }
+  }, [includeCaptions]);
+
   const is4kActive = enable4kFilter !== undefined ? enable4kFilter : internal4k;
+  const isCaptionsActive = includeCaptions !== undefined ? includeCaptions : internalCaptions;
 
   const handleToggle4k = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -57,6 +75,14 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
     setInternal4k(nextVal);
     onToggle4kFilter?.(nextVal);
   };
+
+  const handleToggleCaptions = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextVal = !isCaptionsActive;
+    setInternalCaptions(nextVal);
+    onToggleCaptions?.(nextVal);
+  };
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [nativeVideoPlayable, setNativeVideoPlayable] = useState<boolean>(false);
@@ -139,11 +165,31 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
 
   // Find active subtitle dialogue segment at currentTime
   const currentSubtitle = React.useMemo(() => {
-    if (!transcript?.segments || transcript.segments.length === 0) return null;
-    return transcript.segments.find(
+    if (!transcript?.segments || transcript.segments.length === 0) {
+      if (clipHook && currentTime >= startSec && currentTime <= startSec + 4.0) {
+        return { start: startSec, end: startSec + 4.0, text: clipHook, speaker: 'Hook' } as TranscriptSegment;
+      }
+      return null;
+    }
+    const directMatch = transcript.segments.find(
       (seg) => currentTime >= seg.start && currentTime <= seg.end
     );
-  }, [transcript, currentTime]);
+    if (directMatch) return directMatch;
+
+    // Tolerance search for smoother subtitle flow
+    const fuzzyMatch = transcript.segments.find(
+      (seg) => currentTime >= seg.start - 0.25 && currentTime <= seg.end + 0.25
+    );
+    if (fuzzyMatch) return fuzzyMatch;
+
+    if (clipHook && currentTime >= startSec && currentTime <= startSec + 3.5) {
+      return { start: startSec, end: startSec + 3.5, text: clipHook, speaker: 'Hook' } as TranscriptSegment;
+    }
+    return null;
+  }, [transcript, currentTime, clipHook, startSec]);
+
+  const activeSubtitleText = currentSubtitle?.text || '';
+  const activeSubtitleSpeaker = currentSubtitle?.speaker;
 
   // Canvas Studio Renderer for Demo / Fallback Playback
   const drawCanvasFrame = useCallback(
@@ -432,8 +478,24 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
         }`}
       />
 
-      {/* CapCut 4K Quality Quick Toggle Button in top-right corner of player */}
-      <div className="absolute top-2.5 right-2.5 z-20 pointer-events-auto">
+      {/* Top Action Overlay: Subtitle CC and 4K Filter Quick Toggles */}
+      <div className="absolute top-2.5 right-2.5 z-20 pointer-events-auto flex items-center gap-2">
+        {/* Caption Toggle */}
+        <button
+          type="button"
+          onClick={handleToggleCaptions}
+          className={`px-2.5 py-1 rounded-full text-[11px] font-mono font-bold flex items-center gap-1.5 transition shadow-lg backdrop-blur-md border ${
+            isCaptionsActive
+              ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30'
+              : 'bg-neutral-950/80 text-neutral-400 border-neutral-700 hover:text-white hover:border-neutral-500'
+          }`}
+          title={isCaptionsActive ? 'Subtitles: ON (Click to toggle)' : 'Subtitles: OFF (Click to toggle)'}
+        >
+          <MessageSquareText className="w-3.5 h-3.5" />
+          <span>{isCaptionsActive ? '💬 CC: ON' : 'CC: OFF'}</span>
+        </button>
+
+        {/* CapCut 4K Quality Quick Toggle Button */}
         <button
           type="button"
           onClick={handleToggle4k}
@@ -448,6 +510,51 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
           <span>{is4kActive ? '✨ 4K CC: ON' : '4K CC: OFF'}</span>
         </button>
       </div>
+
+      {/* 4. Live High-Impact Subtitle Overlay (Preview) */}
+      {isCaptionsActive && activeSubtitleText && (
+        <div className="absolute inset-x-4 bottom-14 z-30 pointer-events-none flex flex-col items-center justify-center text-center">
+          {captionStyle === 'viral_yellow' && (
+            <div className="bg-black/90 backdrop-blur-md border border-amber-500/50 shadow-2xl px-4 py-2 rounded-xl max-w-[85%] transform transition-all duration-100 scale-100">
+              {activeSubtitleSpeaker && (
+                <div className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest mb-0.5 flex items-center justify-center gap-1">
+                  <User className="w-3 h-3 text-amber-400" />
+                  <span>{activeSubtitleSpeaker}</span>
+                </div>
+              )}
+              <p className="text-yellow-300 font-black text-sm sm:text-base md:text-lg tracking-wide uppercase leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,1)]">
+                {activeSubtitleText}
+              </p>
+            </div>
+          )}
+
+          {captionStyle === 'clean_white' && (
+            <div className="px-4 py-1.5 max-w-[85%] transform transition-all duration-100 bg-black/40 backdrop-blur-sm rounded-lg">
+              {activeSubtitleSpeaker && (
+                <div className="text-[10px] font-mono font-bold text-white/80 uppercase tracking-widest mb-0.5">
+                  {activeSubtitleSpeaker}
+                </div>
+              )}
+              <p className="text-white font-black text-sm sm:text-base md:text-lg tracking-wide uppercase leading-tight [text-shadow:_0_2px_0_#000,_0_-2px_0_#000,_2px_0_0_#000,_-2px_0_0_#000,_0_4px_8px_rgba(0,0,0,0.9)]">
+                {activeSubtitleText}
+              </p>
+            </div>
+          )}
+
+          {captionStyle === 'minimal' && (
+            <div className="bg-neutral-950/80 backdrop-blur-sm border border-neutral-700/80 px-3.5 py-1.5 rounded-lg max-w-[85%]">
+              {activeSubtitleSpeaker && (
+                <div className="text-[10px] font-mono text-neutral-400 mb-0.5">
+                  {activeSubtitleSpeaker}
+                </div>
+              )}
+              <p className="text-neutral-100 font-semibold text-xs sm:text-sm leading-snug">
+                {activeSubtitleText}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 3. Aspect Ratio Framing Overlays */}
       {showFramingOverlay && (

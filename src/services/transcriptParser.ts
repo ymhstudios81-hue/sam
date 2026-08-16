@@ -579,3 +579,175 @@ export function generateSmartTranscriptClips(
   }));
 }
 
+/**
+ * Format decimal seconds to SRT timecode: 00:01:23,450
+ */
+export function formatSecondsToSrtTimecode(sec: number): string {
+  const s = Math.max(0, sec);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  const ms = Math.floor((s % 1) * 1000);
+  const pad = (n: number, z = 2) => n.toString().padStart(z, '0');
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)},${pad(ms, 3)}`;
+}
+
+/**
+ * Format decimal seconds to VTT timecode: 00:01:23.450
+ */
+export function formatSecondsToVttTimecode(sec: number): string {
+  const s = Math.max(0, sec);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  const ms = Math.floor((s % 1) * 1000);
+  const pad = (n: number, z = 2) => n.toString().padStart(z, '0');
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}.${pad(ms, 3)}`;
+}
+
+/**
+ * Format decimal seconds to ASS timecode: 0:01:23.45
+ */
+export function formatSecondsToAssTimecode(sec: number): string {
+  const s = Math.max(0, sec);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  const cs = Math.floor((s % 1) * 100);
+  const pad = (n: number, z = 2) => n.toString().padStart(z, '0');
+  return `${hrs}:${pad(mins)}:${pad(secs)}.${pad(cs, 2)}`;
+}
+
+/**
+ * Export segments to SRT subtitle file string
+ */
+export function exportToSRT(segments: TranscriptSegment[], offsetSec = 0): string {
+  if (!segments || segments.length === 0) return '';
+  return segments
+    .filter((s) => s.text && s.text.trim())
+    .map((seg, idx) => {
+      const start = Math.max(0, seg.start - offsetSec);
+      const end = Math.max(start + 0.5, seg.end - offsetSec);
+      const speakerPrefix = seg.speaker ? `[${seg.speaker}] ` : '';
+      return `${idx + 1}\n${formatSecondsToSrtTimecode(start)} --> ${formatSecondsToSrtTimecode(end)}\n${speakerPrefix}${seg.text.trim()}\n`;
+    })
+    .join('\n');
+}
+
+/**
+ * Export segments to WebVTT subtitle file string
+ */
+export function exportToVTT(segments: TranscriptSegment[], offsetSec = 0): string {
+  if (!segments || segments.length === 0) return 'WEBVTT\n\n';
+  const body = segments
+    .filter((s) => s.text && s.text.trim())
+    .map((seg, idx) => {
+      const start = Math.max(0, seg.start - offsetSec);
+      const end = Math.max(start + 0.5, seg.end - offsetSec);
+      const speakerPrefix = seg.speaker ? `<v ${seg.speaker}>` : '';
+      return `${idx + 1}\n${formatSecondsToVttTimecode(start)} --> ${formatSecondsToVttTimecode(end)}\n${speakerPrefix}${seg.text.trim()}\n`;
+    })
+    .join('\n');
+  return `WEBVTT\n\n${body}`;
+}
+
+/**
+ * Export segments to Advanced SubStation Alpha (.ass) for professional styled subtitles
+ */
+export function exportToASS(
+  segments: TranscriptSegment[],
+  offsetSec = 0,
+  style: 'viral_yellow' | 'clean_white' | 'minimal' | 'none' = 'viral_yellow',
+  aspect: '9:16' | '16:9' | '1:1' = '9:16'
+): string {
+  const isVertical = aspect === '9:16';
+  const isSquare = aspect === '1:1';
+  const width = isVertical ? 1080 : 1920;
+  const height = isVertical ? 1920 : (isSquare ? 1080 : 1080);
+  const fontSize = isVertical ? 58 : 46;
+  const marginV = isVertical ? 280 : 110;
+
+  // ASS Colors in &HAABBGGRR format
+  let styleLine = '';
+  if (style === 'viral_yellow') {
+    // Bright Yellow primary &H0000D7FF (BGR: FF D7 00), Black outline 5px, Translucent drop shadow
+    styleLine = `Style: Default,Nimbus Sans,${fontSize},&H0000D7FF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,3,2,60,60,${marginV},1`;
+  } else if (style === 'clean_white') {
+    // Pure White primary &H00FFFFFF, Heavy Black outline 6px
+    styleLine = `Style: Default,Nimbus Sans,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,2,60,60,${marginV},1`;
+  } else {
+    // Minimal Gray
+    styleLine = `Style: Default,Nimbus Sans,${fontSize - 8},&H00F0F0F0,&H000000FF,&H00151515,&H60000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,${marginV},1`;
+  }
+
+  const header = `[Script Info]
+Title: ShortsForge Viral Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: None
+PlayResX: ${width}
+PlayResY: ${height}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+${styleLine}
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
+  const events = segments
+    .filter((s) => s.text && s.text.trim())
+    .map((seg) => {
+      const start = Math.max(0, seg.start - offsetSec);
+      const end = Math.max(start + 0.4, seg.end - offsetSec);
+      
+      // Wrap lines into max 24 chars for vertical shorts
+      const words = seg.text.trim().split(/\s+/);
+      const lines: string[] = [];
+      let currentLine = '';
+      for (const w of words) {
+        if ((currentLine + ' ' + w).trim().length <= (isVertical ? 24 : 36)) {
+          currentLine = (currentLine ? currentLine + ' ' : '') + w;
+        } else {
+          if (currentLine) lines.push(currentLine);
+          currentLine = w;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+
+      let formattedText = lines.join('\\N');
+      if (style === 'viral_yellow') {
+        formattedText = `{\\b1}${formattedText}{\\b0}`;
+      }
+
+      return `Dialogue: 0,${formatSecondsToAssTimecode(start)},${formatSecondsToAssTimecode(end)},Default,,0,0,0,,${formattedText}`;
+    })
+    .join('\n');
+
+  return header + events + '\n';
+}
+
+/**
+ * Trigger client-side download of generated subtitle file (.srt / .vtt)
+ */
+export function downloadSubtitleFile(
+  segments: TranscriptSegment[],
+  filename = 'subtitles.srt',
+  format: 'srt' | 'vtt' = 'srt',
+  offsetSec = 0
+) {
+  const content = format === 'vtt' ? exportToVTT(segments, offsetSec) : exportToSRT(segments, offsetSec);
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+
