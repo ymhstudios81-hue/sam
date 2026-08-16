@@ -275,21 +275,15 @@ export default function App() {
   };
 
   // Claude AI Transcript Analysis Handler
-  const handleAnalyzeWithClaude = async (
-    customPrompt?: string,
-    durationMode: 'auto' | 'custom' | 'short' | 'medium' | 'long' = 'auto'
-  ) => {
+  const handleAnalyzeWithClaude = async () => {
     if (!activeProject?.transcript?.segments.length) {
       showNotification('Please upload a timestamped transcript first.', 'error');
       return;
     }
 
     setIsAnalyzing(true);
-    const modeLabel = durationMode === 'auto' ? 'Auto Complete Story' : `${durationMode} duration`;
     showNotification(
-      customPrompt 
-        ? `Claude analyzing transcript with custom instruction (${modeLabel})...`
-        : `Claude is evaluating transcript to extract TOP ${clipCount} viral clips (${modeLabel})...`,
+      `Claude is evaluating transcript to extract TOP ${clipCount} viral clips...`,
       'info'
     );
 
@@ -304,8 +298,6 @@ export default function App() {
           video_duration: activeProject.video?.duration,
           api_key_override: settings.anthropicApiKey,
           model_override: settings.claudeModel,
-          custom_prompt: customPrompt,
-          duration_mode: durationMode,
           min_clip_duration: settings.minClipDuration,
           max_clip_duration: settings.maxClipDuration,
         }),
@@ -323,9 +315,7 @@ export default function App() {
           }));
           setIsAnalyzing(false);
           showNotification(
-            customPrompt
-              ? `Discovered ${result.clips.length} moments matching your instruction!`
-              : `Discovered ${result.clips.length} high-viral moments!`,
+            `Discovered ${result.clips.length} high-viral moments!`,
             'success'
           );
           return;
@@ -343,8 +333,8 @@ export default function App() {
         activeProject.video?.duration,
         settings.aspectRatio || '9:16',
         settings.cropMode || 'center',
-        customPrompt,
-        durationMode,
+        undefined,
+        'auto',
         settings.minClipDuration,
         settings.maxClipDuration
       );
@@ -359,9 +349,7 @@ export default function App() {
 
       setIsAnalyzing(false);
       showNotification(
-        customPrompt
-          ? `Discovered ${generatedClips.length} clips tailored to your instruction.`
-          : `Discovered ${generatedClips.length} high-viral moments from transcript!`,
+        `Discovered ${generatedClips.length} high-viral moments from transcript!`,
         'success'
       );
     }, 1000);
