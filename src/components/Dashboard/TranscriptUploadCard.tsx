@@ -204,7 +204,7 @@ export const TranscriptUploadCard: React.FC<TranscriptUploadCardProps> = ({
               ))}
               {transcript.segments.length > 10 && (
                 <p className="text-center text-[10px] text-neutral-500 pt-1 font-mono">
-                  + {transcript.segments.length - 10} more segments ready for Claude analysis
+                  + {transcript.segments.length - 10} more segments ready for auto clip detection
                 </p>
               )}
             </div>

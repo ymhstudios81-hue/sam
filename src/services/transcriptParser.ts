@@ -409,6 +409,11 @@ export function generateSmartTranscriptClips(
       currentEnd = seg.end;
       const dur = currentEnd - startSeg.start;
 
+      // Early break: once duration exceeds maximum clip window, stop scanning further j segments
+      if (dur > targetDurationMax + 15) {
+        break;
+      }
+
       const endsWithPunctuation = /[.!?]$/.test(seg.text.trim());
 
       if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 10)) {
@@ -478,6 +483,11 @@ export function generateSmartTranscriptClips(
           topics: rawWords.length > 0 ? rawWords.slice(0, 3) : ['insights', 'mindset', 'strategy'],
           customPromptMatchCount: promptMatches
         });
+
+        // Cap total collected candidates to preserve memory
+        if (candidates.length > 300) {
+          break;
+        }
       }
     }
   }

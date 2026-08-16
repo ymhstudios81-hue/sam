@@ -150,40 +150,23 @@ export default function App() {
     setIsUploadingVideo(true);
     const previewUrl = URL.createObjectURL(file);
 
-    // Read small/medium files into base64 to store on server for 100% native FFmpeg rendering
+    // Stream file directly to server as binary for 100% native FFmpeg rendering without high RAM usage
     let serverVideoMeta: VideoMetadata | null = null;
     try {
-      if (file.size < 400 * 1024 * 1024) {
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve) => {
-          reader.onload = () => {
-            const res = reader.result as string;
-            const base64 = res.split(',')[1] || '';
-            resolve(base64);
-          };
-          reader.onerror = () => resolve('');
-        });
-
-        reader.readAsDataURL(file);
-        const base64Data = await base64Promise;
-        if (base64Data) {
-          const uploadRes = await fetch('/api/upload-video', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              filename: file.name,
-              base64Data,
-              duration: 120,
-            }),
-          });
-          const uploadData = await uploadRes.json();
-          if (uploadData.success && uploadData.video) {
-            serverVideoMeta = {
-              ...uploadData.video,
-              previewUrl,
-            };
-          }
-        }
+      const uploadRes = await fetch(`/api/upload-video-binary?filename=${encodeURIComponent(file.name)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-filename': file.name
+        },
+        body: file,
+      });
+      const uploadData = await uploadRes.json();
+      if (uploadData.success && uploadData.video) {
+        serverVideoMeta = {
+          ...uploadData.video,
+          previewUrl,
+        };
       }
     } catch (uploadErr) {
       console.warn('Server upload fallback:', uploadErr);
@@ -247,14 +230,31 @@ export default function App() {
     setIsUploadingVideo(false);
   };
 
-  // Transcript Upload Handler
+  // Transcript Upload Handler (Automatically detects & creates clips with original model upon upload)
   const handleTranscriptSubmitted = (rawText: string, fileName?: string) => {
     setIsUploadingTranscript(true);
     const parsed = parseTranscript(rawText, activeProject?.video?.duration);
 
+    let autoClips: Clip[] = [];
+    if (parsed.isTimestamped && parsed.segments.length > 0) {
+      autoClips = generateSmartTranscriptClips(
+        parsed.segments,
+        clipCount,
+        activeProject?.video?.duration,
+        settings.aspectRatio || '9:16',
+        settings.cropMode || 'center',
+        undefined,
+        'auto',
+        settings.minClipDuration,
+        settings.maxClipDuration
+      );
+    }
+
     updateActiveProject((prev) => ({
       ...prev,
       transcript: parsed,
+      clips: autoClips.length > 0 ? autoClips : prev.clips,
+      analyzedAt: autoClips.length > 0 ? new Date().toISOString() : prev.analyzedAt,
       updatedAt: new Date().toISOString(),
     }));
 
@@ -264,6 +264,8 @@ export default function App() {
       showNotification('Plain text loaded. Timestamped transcript (SRT/VTT) is required for auto-cutting.', 'info');
     } else if (parsed.validationError) {
       showNotification(parsed.validationError, 'error');
+    } else if (autoClips.length > 0) {
+      showNotification(`SRT loaded! Automatically detected and generated ${autoClips.length} clips with original model.`, 'success');
     } else {
       showNotification(`Transcript parsed: ${parsed.segments.length} dialogue segments ready`, 'success');
     }
@@ -274,58 +276,92 @@ export default function App() {
     handleTranscriptSubmitted(SAMPLE_PODCAST_SRT, 'deep_focus_ep48.srt');
   };
 
-  // Claude AI Transcript Analysis Handler
-  const handleAnalyzeWithClaude = async () => {
+  // Handle Clip Count Change (Dynamically re-detects clips with original model)
+  const handleClipCountChange = (count: number) => {
+    setClipCount(count);
+    if (activeProject?.transcript?.segments && activeProject.transcript.segments.length > 0) {
+      const updatedClips = generateSmartTranscriptClips(
+        activeProject.transcript.segments,
+        count,
+        activeProject?.video?.duration,
+        settings.aspectRatio || '9:16',
+        settings.cropMode || 'center',
+        undefined,
+        'auto',
+        settings.minClipDuration,
+        settings.maxClipDuration
+      );
+
+      updateActiveProject((prev) => ({
+        ...prev,
+        clips: updatedClips,
+        analyzedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+
+      showNotification(`Auto-detected ${updatedClips.length} clips for selected count.`, 'success');
+    }
+  };
+
+  // Viral Clip Detection Handler (Original Model default, with optional Claude AI)
+  const handleAnalyzeClips = async (engine: 'original' | 'claude' = 'original') => {
     if (!activeProject?.transcript?.segments.length) {
       showNotification('Please upload a timestamped transcript first.', 'error');
       return;
     }
 
     setIsAnalyzing(true);
+
+    if (engine === 'claude') {
+      showNotification(
+        `Claude AI is evaluating transcript for ${clipCount} viral moments...`,
+        'info'
+      );
+
+      try {
+        const response = await fetch(`/api/projects/${activeProject.id}/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clip_count: clipCount,
+            segments: activeProject.transcript.segments,
+            video_duration: activeProject.video?.duration,
+            api_key_override: settings.anthropicApiKey,
+            model_override: settings.claudeModel,
+            min_clip_duration: settings.minClipDuration,
+            max_clip_duration: settings.maxClipDuration,
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.clips && result.clips.length > 0) {
+            updateActiveProject((prev) => ({
+              ...prev,
+              clips: result.clips,
+              claudeModelUsed: settings.claudeModel,
+              analyzedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }));
+            setIsAnalyzing(false);
+            showNotification(
+              `Claude discovered ${result.clips.length} viral moments!`,
+              'success'
+            );
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Backend analyze API error, using original model:', err);
+      }
+    }
+
+    // Original built-in model execution
     showNotification(
-      `Claude is evaluating transcript to extract TOP ${clipCount} viral clips...`,
+      `Original model detecting TOP ${clipCount} viral clips...`,
       'info'
     );
 
-    try {
-      // 1. Attempt server-side Anthropic / smart analysis API endpoint
-      const response = await fetch(`/api/projects/${activeProject.id}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clip_count: clipCount,
-          segments: activeProject.transcript.segments,
-          video_duration: activeProject.video?.duration,
-          api_key_override: settings.anthropicApiKey,
-          model_override: settings.claudeModel,
-          min_clip_duration: settings.minClipDuration,
-          max_clip_duration: settings.maxClipDuration,
-        }),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        if (result.clips && result.clips.length > 0) {
-          updateActiveProject((prev) => ({
-            ...prev,
-            clips: result.clips,
-            claudeModelUsed: settings.claudeModel,
-            analyzedAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }));
-          setIsAnalyzing(false);
-          showNotification(
-            `Discovered ${result.clips.length} high-viral moments!`,
-            'success'
-          );
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('Backend analyze API error, using dynamic client-side engine:', err);
-    }
-
-    // Client-side high-retention smart editorial clips analysis matching Claude criteria
     setTimeout(() => {
       const generatedClips = generateSmartTranscriptClips(
         activeProject.transcript?.segments || [],
@@ -342,17 +378,17 @@ export default function App() {
       updateActiveProject((prev) => ({
         ...prev,
         clips: generatedClips,
-        claudeModelUsed: settings.claudeModel,
+        claudeModelUsed: engine === 'original' ? 'Original Built-in Model' : settings.claudeModel,
         analyzedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }));
 
       setIsAnalyzing(false);
       showNotification(
-        `Discovered ${generatedClips.length} high-viral moments from transcript!`,
+        `Original model detected ${generatedClips.length} high-viral moments from transcript!`,
         'success'
       );
-    }, 1000);
+    }, 400);
   };
 
   // Toggle Clip Selection
@@ -763,13 +799,13 @@ export default function App() {
               />
             </div>
 
-            {/* Step 3: Claude Analyze Card */}
+            {/* Step 3: AI Clip Detector Card (Original Model Default) */}
             <ClaudeAnalyzeCard
               transcript={activeProject?.transcript}
               settings={settings}
               clipCount={clipCount}
-              onClipCountChange={setClipCount}
-              onAnalyze={handleAnalyzeWithClaude}
+              onClipCountChange={handleClipCountChange}
+              onAnalyze={handleAnalyzeClips}
               isAnalyzing={isAnalyzing}
               hasClips={Boolean(activeProject?.clips?.length)}
             />

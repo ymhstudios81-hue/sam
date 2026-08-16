@@ -15,6 +15,21 @@ export interface VideoRenderOptions {
   fps?: number;
 }
 
+let cachedVirtualCanvas: HTMLCanvasElement | null = null;
+let cachedVirtualCtx: CanvasRenderingContext2D | null = null;
+
+function getSharedVirtualCanvas(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  if (typeof document === 'undefined') return null;
+  if (!cachedVirtualCanvas) {
+    cachedVirtualCanvas = document.createElement('canvas');
+    cachedVirtualCanvas.width = 1920;
+    cachedVirtualCanvas.height = 1080;
+    cachedVirtualCtx = cachedVirtualCanvas.getContext('2d');
+  }
+  if (!cachedVirtualCtx) return null;
+  return { canvas: cachedVirtualCanvas, ctx: cachedVirtualCtx };
+}
+
 /**
  * Render procedural podcast frame for synthetic demo videos or when video source frame is unavailable
  */
@@ -34,12 +49,10 @@ function drawProceduralPodcastFrame(
   const vWidth = 1920;
   const vHeight = 1080;
 
-  // Offscreen buffer for virtual canvas
-  const virtualCanvas = document.createElement('canvas');
-  virtualCanvas.width = vWidth;
-  virtualCanvas.height = vHeight;
-  const vCtx = virtualCanvas.getContext('2d');
-  if (!vCtx) return;
+  const shared = getSharedVirtualCanvas();
+  if (!shared) return;
+  const { canvas: virtualCanvas, ctx: vCtx } = shared;
+  vCtx.clearRect(0, 0, vWidth, vHeight);
 
   const frameTick = curTime * 30;
 

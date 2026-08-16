@@ -657,6 +657,11 @@ export function generateSmartTranscriptClips(
       currentEnd = seg.end;
       const dur = currentEnd - startSeg.start;
 
+      // Early break: once duration exceeds maximum clip window, stop scanning further j segments
+      if (dur > targetDurationMax + 15) {
+        break;
+      }
+
       const endsWithPunctuation = /[.!?]$/.test(seg.text.trim());
 
       if (dur >= targetDurationMin && dur <= targetDurationMax && (endsWithPunctuation || dur > targetDurationMin + 10)) {
@@ -730,6 +735,11 @@ export function generateSmartTranscriptClips(
           topics: rawWords.length > 0 ? rawWords.slice(0, 3) : ['insights', 'mindset', 'strategy'],
           customPromptMatchCount: promptMatches
         });
+
+        // Cap total collected candidates to preserve memory
+        if (candidates.length > 300) {
+          break;
+        }
       }
     }
   }
@@ -1044,7 +1054,57 @@ export async function handleApiRoute(req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Direct Upload Video Endpoint
+    // Direct Binary Streaming Upload Endpoint (Streams raw chunks directly to disk with 0 heap RAM overhead)
+    if (url === '/api/upload-video-binary' && method === 'POST') {
+      const uploadsDir = path.join(currentWorkspaceDir, 'uploads');
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+      const rawFilename = (req.query.filename as string) || (req.headers['x-filename'] as string) || `video_${Date.now()}.mp4`;
+      const safeFilename = path.basename(rawFilename).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const targetPath = path.join(uploadsDir, safeFilename);
+
+      await new Promise<void>((resolve, reject) => {
+        const fileStream = fs.createWriteStream(targetPath);
+        req.pipe(fileStream);
+        fileStream.on('finish', () => resolve());
+        fileStream.on('error', (err) => reject(err));
+        req.on('error', (err) => reject(err));
+      });
+
+      let meta: any = {
+        filename: safeFilename,
+        originalName: rawFilename,
+        duration: 120,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        videoCodec: 'h264',
+        audioCodec: 'aac',
+        fileSize: fs.existsSync(targetPath) ? fs.statSync(targetPath).size : 0,
+        localPath: targetPath,
+        previewUrl: `/api/files/download?path=${encodeURIComponent(targetPath)}`,
+        hasAudio: true
+      };
+
+      if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 1000) {
+        try {
+          const probed = await extractFfprobeMetadata(targetPath);
+          meta = {
+            ...meta,
+            ...probed,
+            localPath: targetPath,
+            previewUrl: `/api/files/download?path=${encodeURIComponent(targetPath)}`,
+          };
+        } catch (probeErr) {
+          console.warn('Could not probe uploaded video:', probeErr);
+        }
+      }
+
+      res.json({ success: true, video: meta });
+      return;
+    }
+
+    // Direct Upload Video Endpoint (Base64 fallback for small payloads)
     if (url === '/api/upload-video' && method === 'POST') {
       const uploadsDir = path.join(currentWorkspaceDir, 'uploads');
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });

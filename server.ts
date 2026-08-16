@@ -10,8 +10,17 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '500mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '500mb' }));
+  // 1. Direct streaming API routes BEFORE json body-parser to avoid buffering whole video into V8 heap
+  app.post('/api/upload-video-binary', async (req, res, next) => {
+    try {
+      await handleApiRoute(req, res);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.use(express.json({ limit: '20mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
   // API routes FIRST
   app.use('/api', async (req, res, next) => {
