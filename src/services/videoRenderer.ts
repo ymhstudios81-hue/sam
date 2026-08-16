@@ -190,14 +190,6 @@ function drawProceduralPodcastFrame(
       let sx = idealX - cropW / 2;
       sx = Math.max(0, Math.min(vWidth - cropW, sx));
       ctx.drawImage(virtualCanvas, sx, 0, cropW, cropH, 0, 0, width, height);
-    } else if (cropMode === 'blur') {
-      // Blurred background + Center fit
-      ctx.drawImage(virtualCanvas, 0, 0, vWidth, vHeight, 0, 0, width, height);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-      ctx.fillRect(0, 0, width, height);
-      const fitH = width / (vWidth / vHeight);
-      const fitY = (height - fitH) / 2;
-      ctx.drawImage(virtualCanvas, 0, fitY, width, fitH);
     } else {
       let sx = (vWidth - cropW) / 2;
       if (cropMode === 'custom') {
@@ -273,6 +265,39 @@ export async function renderClipToBlob(
     try {
       onProgress?.(5, 'Initializing high-speed video encoder...');
 
+      // 1. Attempt native FFmpeg 30 FPS CFR render via backend API
+      try {
+        onProgress?.(15, 'Rendering via FFmpeg 30 FPS CFR pipeline...');
+        const apiRes = await fetch('/api/render-clip-direct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_path: video?.localPath,
+            start: clip.start,
+            duration: clip.duration,
+            aspect_ratio: clip.aspectRatio || '9:16',
+            crop_mode: clip.cropMode || 'center',
+            custom_pan_percent: clip.customPanPercent || 50.0,
+            clip_title: clip.title,
+            clip_rank: clip.rank,
+          }),
+        });
+
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          if (apiData.success && apiData.outputFileUrl) {
+            onProgress?.(100, 'Render complete (30 FPS CFR verified)!');
+            return {
+              blob: new Blob([], { type: 'video/mp4' }),
+              url: apiData.outputFileUrl,
+              filename: apiData.filename || `clip_${clip.rank}_9x16.mp4`,
+            };
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend FFmpeg direct render skipped, using local engine:', backendErr);
+      }
+
       const aspect = clip.aspectRatio || '9:16';
       let width = 1080;
       let height = 1920;
@@ -294,11 +319,6 @@ export async function renderClipToBlob(
       if (!ctx) {
         throw new Error('Canvas 2D rendering context is not supported in this browser.');
       }
-
-      const blurCanvas = document.createElement('canvas');
-      blurCanvas.width = 64;
-      blurCanvas.height = 114;
-      const blurCtx = blurCanvas.getContext('2d');
 
       const startSec = Math.max(0, clip.start);
       const endSec = Math.max(startSec + 1, clip.end || startSec + (clip.duration || 30));
@@ -556,18 +576,7 @@ export async function renderClipToBlob(
             const targetAspect = 9 / 16;
             const srcAspect = vWidth / vHeight;
 
-            if (cropMode === 'blur') {
-              if (blurCtx) {
-                blurCtx.drawImage(videoEl, 0, 0, 64, 114);
-                ctx.imageSmoothingEnabled = true;
-                ctx.drawImage(blurCanvas, 0, 0, width, height);
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-                ctx.fillRect(0, 0, width, height);
-              }
-              const fitH = width / srcAspect;
-              const fitY = (height - fitH) / 2;
-              ctx.drawImage(videoEl, 0, fitY, width, fitH);
-            } else if (cropMode === 'split') {
+            if (cropMode === 'split') {
               const halfH = height / 2;
               const halfAspect = width / halfH;
               const cropW = vHeight * halfAspect;

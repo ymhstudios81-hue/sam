@@ -33,7 +33,7 @@ export interface TranscriptData {
   totalDuration?: number;
 }
 
-export type CropMode = 'autoface' | 'center' | 'blur' | 'custom' | 'split';
+export type CropMode = 'autoface' | 'center' | 'custom' | 'split';
 
 export interface Clip {
   id: string;

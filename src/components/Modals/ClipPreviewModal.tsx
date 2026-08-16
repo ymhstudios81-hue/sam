@@ -563,7 +563,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2.5">
                 {[
                   {
                     mode: 'autoface' as CropMode,
@@ -579,12 +579,7 @@ export const ClipPreviewModal: React.FC<ClipPreviewModalProps> = ({
                   {
                     mode: 'center' as CropMode,
                     title: 'Center Crop',
-                    desc: `Direct ${aspectRatio === '9:16' ? '1080×1920' : '1080×1080'} center cut`,
-                  },
-                  {
-                    mode: 'blur' as CropMode,
-                    title: 'Blurred Backdrop',
-                    desc: 'Fit full frame with smooth blurred edge fill',
+                    desc: `Direct ${aspectRatio === '9:16' ? '1080×1920' : '1080×1080'} clean full-screen cut`,
                   },
                   {
                     mode: 'custom' as CropMode,

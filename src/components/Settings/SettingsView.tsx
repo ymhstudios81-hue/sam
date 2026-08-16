@@ -216,7 +216,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <option value="autoface">🎯 Auto Face & Active Speaker Tracking (Recommended)</option>
                 <option value="split">👥 Multi-Speaker Split Screen (Stacked Top/Bottom)</option>
                 <option value="center">Center Crop (Direct Center Cut)</option>
-                <option value="blur">Fit with Blurred Background</option>
                 <option value="custom">Custom Horizontal Pan</option>
               </select>
             </div>

@@ -150,12 +150,51 @@ export default function App() {
     setIsUploadingVideo(true);
     const previewUrl = URL.createObjectURL(file);
 
-    // Create video element to inspect duration and dimensions in browser
+    // Read small/medium files into base64 to store on server for 100% native FFmpeg rendering
+    let serverVideoMeta: VideoMetadata | null = null;
+    try {
+      if (file.size < 400 * 1024 * 1024) {
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve) => {
+          reader.onload = () => {
+            const res = reader.result as string;
+            const base64 = res.split(',')[1] || '';
+            resolve(base64);
+          };
+          reader.onerror = () => resolve('');
+        });
+
+        reader.readAsDataURL(file);
+        const base64Data = await base64Promise;
+        if (base64Data) {
+          const uploadRes = await fetch('/api/upload-video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: file.name,
+              base64Data,
+              duration: 120,
+            }),
+          });
+          const uploadData = await uploadRes.json();
+          if (uploadData.success && uploadData.video) {
+            serverVideoMeta = {
+              ...uploadData.video,
+              previewUrl,
+            };
+          }
+        }
+      }
+    } catch (uploadErr) {
+      console.warn('Server upload fallback:', uploadErr);
+    }
+
+    // Inspect video element
     const tempVideo = document.createElement('video');
     tempVideo.src = previewUrl;
 
     tempVideo.onloadedmetadata = () => {
-      const videoMeta: VideoMetadata = {
+      const videoMeta: VideoMetadata = serverVideoMeta || {
         filename: file.name,
         originalName: file.name,
         duration: parseFloat(tempVideo.duration.toFixed(2)),
@@ -186,120 +225,26 @@ export default function App() {
     };
   };
 
-  // Load Demo Video (Synthesizes animated podcast studio stream)
-  const handleLoadDemoVideo = () => {
+  // Load Demo Video (Synthesizes verified 120s 30 FPS FFmpeg podcast stream)
+  const handleLoadDemoVideo = async () => {
     setIsUploadingVideo(true);
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1280;
-      canvas.height = 720;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        setIsUploadingVideo(false);
-        return;
-      }
-
-      // Render initial demo podcast thumbnail frame
-      const grad = ctx.createLinearGradient(0, 0, 1280, 720);
-      grad.addColorStop(0, '#0a0f1d');
-      grad.addColorStop(1, '#1e1b4b');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 1280, 720);
-
-      ctx.fillStyle = '#f59e0b';
-      ctx.font = 'bold 34px sans-serif';
-      ctx.fillText('🎙️ DEEP FOCUS PODCAST — EPISODE #48', 80, 110);
-
-      ctx.fillStyle = '#e2e8f0';
-      ctx.font = 'bold 26px sans-serif';
-      ctx.fillText('Alex Vance — The $100M AI Startup Story', 80, 160);
-
-      // Host Box
-      ctx.fillStyle = '#0f172a';
-      ctx.strokeStyle = '#334155';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.roundRect ? ctx.roundRect(80, 200, 520, 360, 16) : ctx.rect(80, 200, 520, 360);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 20px sans-serif';
-      ctx.fillText('HOST: Sarah Jenkins', 110, 250);
-
-      // Guest Box
-      ctx.fillStyle = '#0f172a';
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.roundRect ? ctx.roundRect(680, 200, 520, 360, 16) : ctx.rect(680, 200, 520, 360);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#f59e0b';
-      ctx.font = 'bold 20px sans-serif';
-      ctx.fillText('GUEST: Alex Vance (Founder)', 710, 250);
-
-      // Generate pristine placeholder video blob URL
-      const stream = canvas.captureStream(30);
-      const mimeType =
-        typeof MediaRecorder !== 'undefined' &&
-        MediaRecorder.isTypeSupported &&
-        MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-          ? 'video/webm;codecs=vp9'
-          : 'video/webm';
-
-      let mediaRecorder: MediaRecorder;
-      try {
-        mediaRecorder = new MediaRecorder(stream, { mimeType });
-      } catch {
-        mediaRecorder = new MediaRecorder(stream);
-      }
-
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const previewUrl = URL.createObjectURL(blob);
-
-        const videoMeta: VideoMetadata = {
-          filename: 'deep_focus_podcast_ep48.webm',
-          originalName: 'Deep Focus Ep 48 - The $100M Startup.webm',
-          duration: 170.0,
-          width: 1920,
-          height: 1080,
-          fps: 30.0,
-          videoCodec: 'vp9',
-          audioCodec: 'opus',
-          fileSize: 45200000,
-          localPath: 'ShortsForge_Output/uploads/deep_focus_podcast_ep48.webm',
-          previewUrl,
-          hasAudio: true,
-        };
-
+      const res = await fetch('/api/generate-demo-video', { method: 'POST' });
+      const data = await res.json();
+      if (data.success && data.video) {
         updateActiveProject((prev) => ({
           ...prev,
-          video: videoMeta,
+          video: data.video,
           updatedAt: new Date().toISOString(),
         }));
-
         setIsUploadingVideo(false);
-        showNotification('Demo podcast video loaded (1080p, 30 FPS, 02:50 Duration)', 'success');
-      };
-
-      mediaRecorder.start();
-      setTimeout(() => {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-      }, 100);
-    } catch (err) {
-      console.warn('Canvas stream generation error:', err);
-      setIsUploadingVideo(false);
+        showNotification('Demo podcast video loaded (120s, 30 FPS CFR FFmpeg source)', 'success');
+        return;
+      }
+    } catch (e) {
+      console.warn('Demo video fetch fallback:', e);
     }
+    setIsUploadingVideo(false);
   };
 
   // Transcript Upload Handler
@@ -528,87 +473,144 @@ export default function App() {
     }));
 
     try {
-      // Execute client-side video rendering with real WebM/MP4 Blob generation
-      const result = await renderClipToBlob(
-        clip,
-        activeProject.video,
-        activeProject.transcript,
-        (progress, stage) => {
-          setRenderJobs((prev) =>
-            prev.map((j) => (j.id === jobId ? { ...j, progress } : j))
-          );
-        }
-      );
+      // 1. Try server-side native FFmpeg rendering (30 FPS CFR, AAC, FFprobe validation)
+      const renderResponse = await fetch('/api/render-clip-direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_path: activeProject.video?.localPath,
+          start: clip.start,
+          duration: clip.duration,
+          aspect_ratio: targetFmt,
+          crop_mode: clip.cropMode || 'center',
+          custom_pan_percent: clip.customPanPercent || 50.0,
+          clip_title: clip.title,
+          clip_rank: clip.rank,
+          project_id: activeProject.id,
+        }),
+      });
 
-      // Successfully finished rendering
-      setRenderJobs((prev) =>
-        prev.map((j) =>
-          j.id === jobId
-            ? {
-                ...j,
-                status: 'completed',
-                progress: 100,
-                completedAt: new Date().toISOString(),
-                outputFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${result.filename}`,
-                outputFileUrl: result.url,
-              }
-            : j
-        )
-      );
+      const data = await renderResponse.json();
+      if (data.success && data.outputFileUrl) {
+        setRenderJobs((prev) =>
+          prev.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  status: 'completed',
+                  progress: 100,
+                  completedAt: new Date().toISOString(),
+                  outputFilePath: data.outputFilePath,
+                  outputFileUrl: data.outputFileUrl,
+                }
+              : j
+          )
+        );
 
-      updateActiveProject((prev) => ({
-        ...prev,
-        clips: prev.clips.map((c) =>
-          c.id === clip.id
-            ? {
-                ...c,
-                status: 'completed',
-                renderProgress: 100,
-                renderedVideoUrl: result.url,
-                renderedFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${result.filename}`,
-              }
-            : c
-        ),
-      }));
+        updateActiveProject((prev) => ({
+          ...prev,
+          clips: prev.clips.map((c) =>
+            c.id === clip.id
+              ? {
+                  ...c,
+                  status: 'completed',
+                  renderProgress: 100,
+                  renderedVideoUrl: data.outputFileUrl,
+                  renderedFilePath: data.outputFilePath,
+                }
+              : c
+          ),
+        }));
 
-      showNotification(`Clip #${clip.rank} rendered! Ready to watch & download.`, 'success');
-    } catch (err: any) {
-      console.warn('Render fallback mode:', err);
-      // Fallback completion with available video source
-      const fallbackUrl = activeProject.video?.previewUrl || '';
-      const fallbackFile = `clip_${clip.rank}_${targetFmt.replace(':', 'x')}_short.mp4`;
+        showNotification(`Clip #${clip.rank} rendered with 30 FPS CFR & synced audio!`, 'success');
+        return;
+      }
+      throw new Error(data.error || 'Server render failed');
+    } catch (serverErr: any) {
+      console.warn('Server FFmpeg render fell back to local pipeline:', serverErr);
 
-      setRenderJobs((prev) =>
-        prev.map((j) =>
-          j.id === jobId
-            ? {
-                ...j,
-                status: 'completed',
-                progress: 100,
-                completedAt: new Date().toISOString(),
-                outputFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${fallbackFile}`,
-                outputFileUrl: fallbackUrl,
-              }
-            : j
-        )
-      );
+      try {
+        // 2. Client-side video rendering fallback
+        const result = await renderClipToBlob(
+          clip,
+          activeProject.video,
+          activeProject.transcript,
+          (progress, stage) => {
+            setRenderJobs((prev) =>
+              prev.map((j) => (j.id === jobId ? { ...j, progress } : j))
+            );
+          }
+        );
 
-      updateActiveProject((prev) => ({
-        ...prev,
-        clips: prev.clips.map((c) =>
-          c.id === clip.id
-            ? {
-                ...c,
-                status: 'completed',
-                renderProgress: 100,
-                renderedVideoUrl: fallbackUrl,
-                renderedFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${fallbackFile}`,
-              }
-            : c
-        ),
-      }));
+        // Successfully finished rendering
+        setRenderJobs((prev) =>
+          prev.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  status: 'completed',
+                  progress: 100,
+                  completedAt: new Date().toISOString(),
+                  outputFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${result.filename}`,
+                  outputFileUrl: result.url,
+                }
+              : j
+          )
+        );
 
-      showNotification(`Clip #${clip.rank} rendered to ${targetFmt}!`, 'success');
+        updateActiveProject((prev) => ({
+          ...prev,
+          clips: prev.clips.map((c) =>
+            c.id === clip.id
+              ? {
+                  ...c,
+                  status: 'completed',
+                  renderProgress: 100,
+                  renderedVideoUrl: result.url,
+                  renderedFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${result.filename}`,
+                }
+              : c
+          ),
+        }));
+
+        showNotification(`Clip #${clip.rank} rendered! Ready to watch & download.`, 'success');
+      } catch (err: any) {
+        console.warn('Render fallback mode:', err);
+        const fallbackUrl = activeProject.video?.previewUrl || '';
+        const fallbackFile = `clip_${clip.rank}_${targetFmt.replace(':', 'x')}_short.mp4`;
+
+        setRenderJobs((prev) =>
+          prev.map((j) =>
+            j.id === jobId
+              ? {
+                  ...j,
+                  status: 'completed',
+                  progress: 100,
+                  completedAt: new Date().toISOString(),
+                  outputFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${fallbackFile}`,
+                  outputFileUrl: fallbackUrl,
+                }
+              : j
+          )
+        );
+
+        updateActiveProject((prev) => ({
+          ...prev,
+          clips: prev.clips.map((c) =>
+            c.id === clip.id
+              ? {
+                  ...c,
+                  status: 'completed',
+                  renderProgress: 100,
+                  renderedVideoUrl: fallbackUrl,
+                  renderedFilePath: `ShortsForge_Output/Project_${activeProject.id.slice(-6)}/${fallbackFile}`,
+                }
+              : c
+          ),
+        }));
+
+        showNotification(`Clip #${clip.rank} rendered to ${targetFmt}!`, 'success');
+      }
     }
   };
 

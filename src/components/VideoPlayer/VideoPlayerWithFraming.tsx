@@ -501,14 +501,6 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
                 </div>
               )}
 
-              {cropMode === 'blur' && (
-                <div className="h-full aspect-[9/16] border-2 border-cyan-400/90 bg-cyan-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]">
-                  <div className="absolute top-2 left-2 flex items-center gap-1 bg-cyan-500 text-neutral-950 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shadow">
-                    <span>9:16 Blurred Edges</span>
-                  </div>
-                </div>
-              )}
-
               {cropMode === 'custom' && (
                 <div
                   className="h-full aspect-[9/16] border-2 border-orange-400/90 bg-orange-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.55)] transition-transform duration-75"
@@ -554,14 +546,6 @@ export const VideoPlayerWithFraming: React.FC<VideoPlayerWithFramingProps> = ({
                 <div className="h-full aspect-square border-2 border-purple-400/90 bg-purple-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]">
                   <div className="absolute top-2 left-2 flex items-center gap-1 bg-purple-500 text-neutral-950 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shadow">
                     <span>1:1 Square Center (1080×1080)</span>
-                  </div>
-                </div>
-              )}
-
-              {cropMode === 'blur' && (
-                <div className="h-full aspect-square border-2 border-cyan-400/90 bg-cyan-400/10 relative shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]">
-                  <div className="absolute top-2 left-2 flex items-center gap-1 bg-cyan-500 text-neutral-950 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shadow">
-                    <span>1:1 Blurred Backdrop</span>
                   </div>
                 </div>
               )}

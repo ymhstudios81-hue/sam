@@ -221,7 +221,6 @@ export const ClipCard: React.FC<ClipCardProps> = ({
                 { id: 'autoface', label: '🎯 Face Track' },
                 { id: 'split', label: '👥 Split' },
                 { id: 'center', label: 'Center' },
-                { id: 'blur', label: 'Blur' },
                 { id: 'custom', label: 'Pan' },
               ].map(({ id, label }) => (
                 <button
